@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # --- 1. Load Environment Variables ---
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
-
+api_key = st.secret("GOOGLE_API_KEY")
 # --- 2. Page Configuration ---
 st.set_page_config(
     page_title="NeuroQuest: Arcade Mode",
