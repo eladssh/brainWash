@@ -101,17 +101,16 @@ st.markdown("""
 
 def get_gemini_model():
     """Robust model finder."""
-    if not API_KEY: return None
+    if not API_KEY: 
+        st.error("Missing API Key! Please check your Secrets.") [cite: 1]
+        return None
     try:
         genai.configure(api_key=API_KEY)
-        preferences = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
-        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for pref in preferences:
-            if pref in available: return genai.GenerativeModel(pref)
-        return genai.GenerativeModel(available[0]) if available else None
-    except:
+        # פנייה ישירה למודל מונעת שגיאות סריקה ב-v1beta 
+        return genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.error(f"Gemini Init Error: {e}") [cite: 1]
         return None
-
 
 def extract_text_from_pdf(uploaded_file):
     try:
@@ -125,28 +124,19 @@ def extract_text_from_pdf(uploaded_file):
 def get_initial_plan(subject, topic, context_text=None):
     model = get_gemini_model()
     if not model: return None
-    source = f"PDF Content: {context_text[:20000]}" if context_text else f"Topic: {topic}"
+    
+    # אם חילוץ הטקסט מה-PDF נכשל, נשתמש רק בנושא 
+    source = f"PDF Content: {context_text[:10000]}" if context_text else f"Topic: {topic}"
 
-    prompt = f"""
-    Gamify a study plan for {subject}: {topic}.
-    Create 5 study micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
-    Return STRICT JSON:
-    {{
-        "tasks": [
-            {{"text": "Task...", "difficulty": "Hard", "xp": 300}},
-            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
-            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
-            {{"text": "Task...", "difficulty": "Easy", "xp": 50}},
-            {{"text": "Task...", "difficulty": "Easy", "xp": 50}}
-        ]
-    }}
-    """
+    prompt = f"Gamify a study plan for {subject}: {topic}. Create 5 tasks. Return JSON." # (המשך הפרומפט שלך) 
+
     try:
         response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
         return json.loads(response.text)
-    except:
+    except Exception as e:
+        # כאן תופיע השגיאה האמיתית על המסך במקום שתיקה 
+        st.error(f"Generation Failed: {e}") 
         return None
-
 
 def get_new_task(subject, topic, difficulty, context_text=None):
     model = get_gemini_model()
@@ -416,3 +406,4 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
