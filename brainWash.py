@@ -9,8 +9,7 @@ from dotenv import load_dotenv
 
 # --- 1. Load Environment Variables ---
 load_dotenv()
-API_KEY = os.getenv("GOOGLE_API_KEY")
-api_key = st.secret("GOOGLE_API_KEY")
+API_KEY = "AIzaSyAWMJfbmk333lVpwrPjj5rd82_jWz8_Ac8"
 # --- 2. Page Configuration ---
 st.set_page_config(
     page_title="NeuroQuest: Arcade Mode",
@@ -420,4 +419,5 @@ else:
         st.rerun()
     if b2.button("💀 Game Over (Reset All)", type="primary", use_container_width=True):
         reset_session(keep_xp=False)
+
         st.rerun()
