@@ -1,6 +1,6 @@
 streamlit
-google-generativeai>=0.8.3
+google-genai
 python-dotenv
 pypdf
 pandas
-
+numpy
