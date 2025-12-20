@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai  # הספרייה החדשה
 import json
 import os
 import pypdf
@@ -14,104 +14,77 @@ API_KEY = os.getenv("GOOGLE_API_KEY")
 st.set_page_config(
     page_title="BrainWash: Arcade",
     page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# --- 2. CSS Styles ---
+# --- 2. CSS Styles (נשאר ללא שינוי) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
     .task-card {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        border-left: 10px solid #ddd;
+        background: white; padding: 20px; border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 10px solid #ddd;
         margin-bottom: 15px;
     }
     .diff-Hard { border-left-color: #ff4b4b; } 
     .diff-Medium { border-left-color: #ffa726; } 
     .diff-Easy { border-left-color: #66bb6a; } 
-
-    .badge {
-        padding: 4px 8px;
-        border-radius: 8px;
-        color: white; 
-        font-weight: bold;
-        font-size: 0.75em;
-    }
+    .badge { padding: 4px 8px; border-radius: 8px; color: white; font-weight: bold; font-size: 0.75em; }
     .bg-Hard { background-color: #ff4b4b; }
     .bg-Medium { background-color: #ffa726; }
     .bg-Easy { background-color: #66bb6a; }
-
-    .profile-card {
-        background: white;
-        padding: 25px;
-        border-radius: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        text-align: center;
-        height: 100%;
-    }
-    .brain-avatar { font-size: 70px; margin-bottom: 10px; }
+    .profile-card { background: white; padding: 25px; border-radius: 20px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Core Logic (Fixed to Gemini 1.5 Flash) ---
+# --- 3. Core Logic (Updated to google-genai) ---
 
-def get_gemini_model():
-    """Directly using gemini-1.5-flash for stability."""
+def get_client():
+    """אתחול הלקוח החדש של גוגל"""
     if not API_KEY:
         return None
-    try:
-        genai.configure(api_key=API_KEY)
-        return genai.GenerativeModel('gemini-1.5-flash')
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
-        return None
-
-def extract_text_from_pdf(uploaded_file):
-    try:
-        pdf_reader = pypdf.PdfReader(uploaded_file)
-        return "".join([page.extract_text() for page in pdf_reader.pages])
-    except:
-        return None
+    return genai.Client(api_key=API_KEY)
 
 def get_initial_plan(subject, topic, context_text=None):
-    model = get_gemini_model()
-    if not model: return None
+    client = get_client()
+    if not client: return None
     
-    # context_text helps the AI tailor tasks to the PDF content
     source_info = f"Based on this content: {context_text[:10000]}" if context_text else f"Topic: {topic}"
     
     prompt = f"""
-    You are a gamification expert. Create a study plan for {subject}: {topic}.
-    {source_info}
-    Create 5 micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
+    Create a study plan for {subject}: {topic}. {source_info}
+    Return exactly 5 tasks (1 Hard, 2 Medium, 2 Easy).
     Return ONLY a JSON object:
     {{
         "tasks": [
-            {{"text": "Short task description", "difficulty": "Hard", "xp": 300}},
+            {{"text": "Task description", "difficulty": "Hard", "xp": 300}},
             ...
         ]
     }}
     """
     try:
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+        # שיטת הקריאה החדשה
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
+        )
         return json.loads(response.text)
-    except:
+    except Exception as e:
+        st.error(f"AI Error: {e}")
         return None
 
 def get_new_task(subject, topic, difficulty, context_text=None):
-    model = get_gemini_model()
-    prompt = f"Create one {difficulty} study task for {subject} on the topic {topic}. Return only the task text."
+    client = get_client()
+    if not client: return "Review concepts."
+    prompt = f"Create one {difficulty} study task for {subject} on {topic}. Return only the text."
     try:
-        return model.generate_content(prompt).text.strip()
+        response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
+        return response.text.strip()
     except:
-        return "Review the main concepts again."
+        return "New task generation failed."
 
-# --- 4. Gamification Data ---
-
+# --- 4. Gamification Logic (נשאר ללא שינוי) ---
 BRAIN_LEVELS = [
     (0, "🧟 Brain Rot", "You are losing neurons!"),
     (300, "🧠 Brain Builder", "Building momentum..."),
@@ -135,125 +108,81 @@ if "tasks_completed" not in st.session_state: st.session_state.tasks_completed =
 if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
 if "user_details" not in st.session_state: st.session_state.user_details = {}
 
-# --- 6. Handlers ---
+# --- 6. Helpers ---
+def extract_text_from_pdf(uploaded_file):
+    try:
+        pdf_reader = pypdf.PdfReader(uploaded_file)
+        return "".join([page.extract_text() for page in pdf_reader.pages])
+    except: return None
+
 def handle_complete(index):
     task = st.session_state.current_tasks[index]
     st.session_state.xp += task['xp']
     st.session_state.tasks_completed += 1
-    
     if task['difficulty'] == "Hard": st.balloons()
-    st.toast(f"✅ Completed! +{task['xp']} XP")
+    st.toast(f"✅ +{task['xp']} XP!")
     
-    # Replace with new task
+    # Reroll that specific task slot
     details = st.session_state.user_details
     new_text = get_new_task(details['sub'], details['top'], task['difficulty'], details.get('pdf_text'))
     st.session_state.current_tasks[index]['text'] = new_text
 
-def handle_reroll(index):
-    if st.session_state.xp < 20:
-        st.error("Not enough XP!")
-        return
-    st.session_state.xp -= 20
-    task = st.session_state.current_tasks[index]
-    details = st.session_state.user_details
-    new_text = get_new_task(details['sub'], details['top'], task['difficulty'], details.get('pdf_text'))
-    st.session_state.current_tasks[index]['text'] = new_text
-    st.toast("🎲 Task Rerolled! (-20 XP)")
-
-# --- 7. UI Components ---
+# --- 7. UI Sections ---
 
 def render_profile():
     st.header("👤 Your Brain Profile")
     (xp_req, title, desc), next_xp = get_brain_status(st.session_state.xp)
-    
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.markdown(f"""
-        <div class="profile-card">
-            <div class="brain-avatar">{title.split()[0]}</div>
-            <h2>{title}</h2>
-            <p>{desc}</p>
-            <hr>
-            <h4>Current XP: {st.session_state.xp}</h4>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown(f'<div class="profile-card"><h1>{title.split()[0]}</h1><h2>{title}</h2><p>{desc}</p><h3>XP: {st.session_state.xp}</h3></div>', unsafe_allow_html=True)
     with col2:
-        st.subheader("Stats & Activity")
-        st.metric("Tasks Finished", st.session_state.tasks_completed)
-        
-        # Simple progress to next level
-        progress = (st.session_state.xp - xp_req) / (next_xp - xp_req)
-        st.write(f"Progress to next level:")
-        st.progress(min(max(progress, 0.0), 1.0))
-        st.caption(f"{st.session_state.xp} / {next_xp} XP")
+        st.metric("Tasks Completed", st.session_state.tasks_completed)
+        prog = (st.session_state.xp - xp_req) / (next_xp - xp_req)
+        st.write("Progress to next level:")
+        st.progress(min(max(prog, 0.0), 1.0))
 
 def render_arcade():
     st.header("🎮 Study Arcade")
-
     if not st.session_state.user_details:
-        # LOBBY: Choice between Search and Upload
-        tab1, tab2 = st.tabs(["🔍 Quick Search", "📄 Upload PDF"])
-        
-        with tab1:
-            with st.form("quick_start"):
-                sub = st.text_input("Subject", placeholder="e.g. Biology")
-                top = st.text_input("Topic", placeholder="e.g. Photosynthesis")
-                if st.form_submit_button("Generate Mission", use_container_width=True):
-                    with st.spinner("Generating..."):
-                        data = get_initial_plan(sub, top)
+        t1, t2 = st.tabs(["🔍 Quick Search", "📄 PDF Mission"])
+        with t1:
+            with st.form("f1"):
+                sub = st.text_input("Subject")
+                top = st.text_input("Topic")
+                if st.form_submit_button("Start"):
+                    data = get_initial_plan(sub, top)
+                    if data:
+                        st.session_state.current_tasks = data['tasks']
+                        st.session_state.user_details = {"sub": sub, "top": top}
+                        st.rerun()
+        with t2:
+            with st.form("f2"):
+                sub_pdf = st.text_input("Subject")
+                file = st.file_uploader("Upload PDF", type="pdf")
+                if st.form_submit_button("Analyze"):
+                    if file:
+                        txt = extract_text_from_pdf(file)
+                        data = get_initial_plan(sub_pdf, file.name, txt)
                         if data:
                             st.session_state.current_tasks = data['tasks']
-                            st.session_state.user_details = {"sub": sub, "top": top}
+                            st.session_state.user_details = {"sub": sub_pdf, "top": file.name, "pdf_text": txt}
                             st.rerun()
-
-        with tab2:
-            with st.form("pdf_start"):
-                sub_pdf = st.text_input("Subject", placeholder="e.g. History")
-                uploaded_file = st.file_uploader("Drop your summary/book here", type="pdf")
-                if st.form_submit_button("Analyze & Play", use_container_width=True):
-                    if uploaded_file:
-                        with st.spinner("Reading PDF..."):
-                            text = extract_text_from_pdf(uploaded_file)
-                            data = get_initial_plan(sub_pdf, uploaded_file.name, text)
-                            if data:
-                                st.session_state.current_tasks = data['tasks']
-                                st.session_state.user_details = {"sub": sub_pdf, "top": uploaded_file.name, "pdf_text": text}
-                                st.rerun()
     else:
-        # GAMEPLAY
-        st.info(f"Currently Studying: **{st.session_state.user_details['top']}**")
-        
+        st.info(f"Mission: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
             d = task['difficulty']
-            st.markdown(f"""
-            <div class="task-card diff-{d}">
-                <span class="badge bg-{d}">{d} | +{task['xp']} XP</span>
-                <p style="margin-top:10px; font-weight:500;">{html.escape(task['text'])}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{task["xp"]}</span><br>{html.escape(task["text"])}</div>', unsafe_allow_html=True)
             c1, c2 = st.columns(2)
-            c1.button("✅ Complete", key=f"c_{i}", on_click=handle_complete, args=(i,), use_container_width=True)
-            c2.button("🎲 Reroll (-20)", key=f"r_{i}", on_click=handle_reroll, args=(i,), use_container_width=True)
+            c1.button("✅ Done", key=f"c{i}", on_click=handle_complete, args=(i,))
+            if c2.button("🎲 Reroll (-20)", key=f"r{i}"):
+                if st.session_state.xp >= 20:
+                    st.session_state.xp -= 20
+                    st.session_state.current_tasks[i]['text'] = get_new_task(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
+                    st.rerun()
 
-        if st.button("🏳️ Finish Session", use_container_width=True):
-            st.session_state.user_details = {}
-            st.session_state.current_tasks = []
-            st.rerun()
-
-# --- 8. Main Router ---
-if not API_KEY:
-    st.warning("Please add GOOGLE_API_KEY to your .env file")
-else:
-    with st.sidebar:
-        st.title("🧠 BrainWash")
-        choice = st.radio("Navigation", ["Arcade Mode", "My Profile"])
-        st.divider()
-        st.write(f"**XP:** {st.session_state.xp}")
-        st.write(f"**Tasks:** {st.session_state.tasks_completed}")
-
-    if choice == "Arcade Mode":
-        render_arcade()
-    else:
-        render_profile()
+# --- 8. Main ---
+with st.sidebar:
+    st.title("🧠 BrainWash")
+    choice = st.radio("Menu", ["Arcade", "Profile"])
+if choice == "Arcade": render_arcade()
+else: render_profile()
