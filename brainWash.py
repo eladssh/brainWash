@@ -6,7 +6,7 @@ import base64
 #find key
 from dotenv import load_dotenv
 load_dotenv()
-api_key = AIzaSyAWMJfbmk333lVpwrPjj5rd82_jWz8_Ac8
+api_key = st.secrets["MY_API_KEY"]
 #alterntively from terminal export GEMINI_API_KEY=....
 
 
@@ -191,4 +191,5 @@ if __name__ == '__main__':
     generate()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
+
 
