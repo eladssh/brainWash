@@ -68,8 +68,7 @@ st.markdown("""
 # 4. Gemini 2.0 + fallback
 # =========================
 MODELS = [
-    "models/gemini-2.0-flash",
-    "models/gemini-1.5-flash"
+    "models/gemini-2.0-flash"
 ]
 
 def call_ai(prompt, expect_json=False):
@@ -319,5 +318,6 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
 
 
