@@ -49,40 +49,41 @@ def get_initial_plan(subject, topic, context_text=None):
     client = get_client()
     if not client: return None
     
-    source_info = f"Based on this content: {context_text[:10000]}" if context_text else f"Topic: {topic}"
+    source_info = f"Context: {context_text[:10000]}" if context_text else f"Topic: {topic}"
     
-    prompt = f"""
-    Create a study plan for {subject}: {topic}. {source_info}
-    Return exactly 5 tasks (1 Hard, 2 Medium, 2 Easy).
-    Return ONLY a JSON object:
-    {{
-        "tasks": [
-            {{"text": "Task description", "difficulty": "Hard", "xp": 300}},
-            ...
-        ]
-    }}
-    """
+    prompt = f"Create a 5-task study plan for {subject}: {topic}. {source_info}. Return JSON with 'tasks' list (text, difficulty, xp)."
+
     try:
-        # שיטת הקריאה החדשה
+        # שים לב: כאן הורדנו את הקידומת models/ והשתמשנו בשם נקי
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-1.5-flash', 
             contents=prompt,
             config={'response_mime_type': 'application/json'}
         )
         return json.loads(response.text)
     except Exception as e:
-        st.error(f"AI Error: {e}")
-        return None
+        # אם זה נכשל שוב, ננסה את הגרסה היציבה הספציפית
+        try:
+            response = client.models.generate_content(
+                model='gemini-1.5-flash-001', 
+                contents=prompt,
+                config={'response_mime_type': 'application/json'}
+            )
+            return json.loads(response.text)
+        except:
+            st.error(f"AI Final Error: {e}")
+            return None
 
 def get_new_task(subject, topic, difficulty, context_text=None):
     client = get_client()
     if not client: return "Review concepts."
     prompt = f"Create one {difficulty} study task for {subject} on {topic}. Return only the text."
     try:
+        # שימוש בשם דגם ללא קידומת
         response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
         return response.text.strip()
     except:
-        return "New task generation failed."
+        return "Task generation failed. Keep going!"
 
 # --- 4. Gamification Logic (נשאר ללא שינוי) ---
 BRAIN_LEVELS = [
@@ -186,3 +187,4 @@ with st.sidebar:
     choice = st.radio("Menu", ["Arcade", "Profile"])
 if choice == "Arcade": render_arcade()
 else: render_profile()
+
