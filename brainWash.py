@@ -8,12 +8,18 @@ import time
 import pandas as pd
 from dotenv import load_dotenv
 
-# --- 1. Init & Config ---
 if "GOOGLE_API_KEY" in st.secrets:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
+# ניסיון שני: משיכת המפתח מ-dotenv (בשביל המחשב המקומי)
 else:
     load_dotenv()
     API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# בדיקה סופית אם המפתח קיים בכלל
+if not API_KEY:
+    st.error("Missing API Key! Please add it to Secrets (Cloud) or .env (Local).")
+    st.stop()
+
 
 st.set_page_config(
     page_title="BrainWash: Arcade",
@@ -411,5 +417,6 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
 
 
