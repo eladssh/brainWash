@@ -1,5 +1,5 @@
 import streamlit as st
-from google import genai  # הספרייה החדשה
+from google import genai
 import json
 import os
 import pypdf
@@ -11,16 +11,11 @@ from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
-st.set_page_config(
-    page_title="BrainWash: Arcade",
-    page_icon="🧠",
-    layout="wide"
-)
+st.set_page_config(page_title="BrainWash", page_icon="🧠", layout="wide")
 
-# --- 2. CSS Styles (נשאר ללא שינוי) ---
+# --- 2. CSS ---
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; }
     .task-card {
         background: white; padding: 20px; border-radius: 12px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 10px solid #ddd;
@@ -33,158 +28,146 @@ st.markdown("""
     .bg-Hard { background-color: #ff4b4b; }
     .bg-Medium { background-color: #ffa726; }
     .bg-Easy { background-color: #66bb6a; }
-    .profile-card { background: white; padding: 25px; border-radius: 20px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Core Logic (Updated to google-genai) ---
+# --- 3. Robust AI Logic ---
 
-def get_client():
-    """אתחול הלקוח החדש של גוגל"""
+def get_ai_response(prompt, is_json=False):
+    """מנסה שמות שונים של מודלים כדי לעקוף את שגיאת ה-404"""
     if not API_KEY:
+        st.error("Missing API Key")
         return None
-    return genai.Client(api_key=API_KEY)
-
-def get_initial_plan(subject, topic, context_text=None):
-    client = get_client()
-    if not client: return None
     
-    source_info = f"Context: {context_text[:10000]}" if context_text else f"Topic: {topic}"
+    client = genai.Client(api_key=API_KEY)
     
-    prompt = f"Create a 5-task study plan for {subject}: {topic}. {source_info}. Return JSON with 'tasks' list (text, difficulty, xp)."
+    # רשימת שמות אפשריים למודל - אחד מהם חייב לעבוד
+    model_variants = ['gemini-1.5-flash', 'gemini-1.5-flash-001', 'gemini-1.5-flash-latest']
+    
+    config = {'response_mime_type': 'application/json'} if is_json else None
 
-    try:
-        # שים לב: כאן הורדנו את הקידומת models/ והשתמשנו בשם נקי
-        response = client.models.generate_content(
-            model='gemini-1.5-flash', 
-            contents=prompt,
-            config={'response_mime_type': 'application/json'}
-        )
-        return json.loads(response.text)
-    except Exception as e:
-        # אם זה נכשל שוב, ננסה את הגרסה היציבה הספציפית
+    for model_name in model_variants:
         try:
             response = client.models.generate_content(
-                model='gemini-1.5-flash-001', 
+                model=model_name,
                 contents=prompt,
-                config={'response_mime_type': 'application/json'}
+                config=config
             )
-            return json.loads(response.text)
-        except:
-            st.error(f"AI Final Error: {e}")
-            return None
+            return response.text
+        except Exception:
+            continue # מנסה את השם הבא ברשימה
+            
+    st.error("כל המודלים נכשלו. וודא שה-API Key תקין ופעיל.")
+    return None
 
-def get_new_task(subject, topic, difficulty, context_text=None):
-    client = get_client()
-    if not client: return "Review concepts."
-    prompt = f"Create one {difficulty} study task for {subject} on {topic}. Return only the text."
-    try:
-        # שימוש בשם דגם ללא קידומת
-        response = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
-        return response.text.strip()
-    except:
-        return "Task generation failed. Keep going!"
+def get_initial_plan(subject, topic, context=""):
+    prompt = f"""
+    Create a 5-task study plan for {subject}: {topic}. {f'Context: {context[:5000]}' if context else ''}
+    Return ONLY JSON:
+    {{ "tasks": [
+        {{"text": "Description", "difficulty": "Hard", "xp": 300}},
+        {{"text": "Description", "difficulty": "Medium", "xp": 150}},
+        {{"text": "Description", "difficulty": "Medium", "xp": 150}},
+        {{"text": "Description", "difficulty": "Easy", "xp": 50}},
+        {{"text": "Description", "difficulty": "Easy", "xp": 50}}
+    ] }}
+    """
+    res = get_ai_response(prompt, is_json=True)
+    return json.loads(res) if res else None
 
-# --- 4. Gamification Logic (נשאר ללא שינוי) ---
-BRAIN_LEVELS = [
-    (0, "🧟 Brain Rot", "You are losing neurons!"),
-    (300, "🧠 Brain Builder", "Building momentum..."),
-    (800, "🔥 Brain Heater", "You're getting warm!"),
-    (1500, "⚡ High Voltage", "You're on fire!"),
-    (2500, "🌌 GALAXY BRAIN", "Academic God Mode.")
-]
+def get_new_task(subject, topic, diff):
+    prompt = f"Create one {diff} study task for {subject}: {topic}. Return only the text."
+    return get_ai_response(prompt) or "Stay focused and keep studying!"
 
-def get_brain_status(xp):
-    current = BRAIN_LEVELS[0]
-    next_limit = BRAIN_LEVELS[1][0]
-    for i, level in enumerate(BRAIN_LEVELS):
-        if xp >= level[0]:
-            current = level
-            next_limit = BRAIN_LEVELS[i+1][0] if i+1 < len(BRAIN_LEVELS) else xp + 500
-    return current, next_limit
-
-# --- 5. State Management ---
+# --- 4. Gamification ---
 if "xp" not in st.session_state: st.session_state.xp = 0
 if "tasks_completed" not in st.session_state: st.session_state.tasks_completed = 0
 if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
 if "user_details" not in st.session_state: st.session_state.user_details = {}
 
-# --- 6. Helpers ---
-def extract_text_from_pdf(uploaded_file):
-    try:
-        pdf_reader = pypdf.PdfReader(uploaded_file)
-        return "".join([page.extract_text() for page in pdf_reader.pages])
-    except: return None
+def get_rank(xp):
+    if xp < 300: return "🧟 Brain Rot", "Need more neurons..."
+    if xp < 800: return "🧠 Brain Builder", "Getting stronger!"
+    if xp < 1500: return "⚡ High Voltage", "You are on fire!"
+    return "🌌 GALAXY BRAIN", "Master of the universe."
 
-def handle_complete(index):
-    task = st.session_state.current_tasks[index]
-    st.session_state.xp += task['xp']
-    st.session_state.tasks_completed += 1
-    if task['difficulty'] == "Hard": st.balloons()
-    st.toast(f"✅ +{task['xp']} XP!")
-    
-    # Reroll that specific task slot
-    details = st.session_state.user_details
-    new_text = get_new_task(details['sub'], details['top'], task['difficulty'], details.get('pdf_text'))
-    st.session_state.current_tasks[index]['text'] = new_text
-
-# --- 7. UI Sections ---
+# --- 5. UI Sections ---
 
 def render_profile():
-    st.header("👤 Your Brain Profile")
-    (xp_req, title, desc), next_xp = get_brain_status(st.session_state.xp)
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.markdown(f'<div class="profile-card"><h1>{title.split()[0]}</h1><h2>{title}</h2><p>{desc}</p><h3>XP: {st.session_state.xp}</h3></div>', unsafe_allow_html=True)
-    with col2:
+    st.title("👤 Brain Profile")
+    rank, desc = get_rank(st.session_state.xp)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Total XP", st.session_state.xp)
+        st.write(f"**Rank:** {rank}")
+        st.caption(desc)
+    with c2:
         st.metric("Tasks Completed", st.session_state.tasks_completed)
-        prog = (st.session_state.xp - xp_req) / (next_xp - xp_req)
-        st.write("Progress to next level:")
-        st.progress(min(max(prog, 0.0), 1.0))
+    
+    # XP Graph
+    st.subheader("Progress History")
+    chart_data = pd.DataFrame({"Day": ["Mon", "Tue", "Wed", "Today"], "XP": [0, 50, 150, st.session_state.xp]})
+    st.line_chart(chart_data, x="Day", y="XP")
 
 def render_arcade():
-    st.header("🎮 Study Arcade")
+    st.title("🎮 Arcade Mode")
+    
     if not st.session_state.user_details:
-        t1, t2 = st.tabs(["🔍 Quick Search", "📄 PDF Mission"])
-        with t1:
-            with st.form("f1"):
+        tab1, tab2 = st.tabs(["🔍 Search", "📄 PDF Upload"])
+        
+        with tab1:
+            with st.form("search_form"):
                 sub = st.text_input("Subject")
                 top = st.text_input("Topic")
-                if st.form_submit_button("Start"):
-                    data = get_initial_plan(sub, top)
-                    if data:
-                        st.session_state.current_tasks = data['tasks']
-                        st.session_state.user_details = {"sub": sub, "top": top}
-                        st.rerun()
-        with t2:
-            with st.form("f2"):
+                if st.form_submit_button("Start Mission"):
+                    with st.spinner("Generating..."):
+                        plan = get_initial_plan(sub, top)
+                        if plan:
+                            st.session_state.current_tasks = plan['tasks']
+                            st.session_state.user_details = {"sub": sub, "top": top}
+                            st.rerun()
+        with tab2:
+            with st.form("pdf_form"):
                 sub_pdf = st.text_input("Subject")
                 file = st.file_uploader("Upload PDF", type="pdf")
-                if st.form_submit_button("Analyze"):
+                if st.form_submit_button("Analyze PDF"):
                     if file:
-                        txt = extract_text_from_pdf(file)
-                        data = get_initial_plan(sub_pdf, file.name, txt)
-                        if data:
-                            st.session_state.current_tasks = data['tasks']
-                            st.session_state.user_details = {"sub": sub_pdf, "top": file.name, "pdf_text": txt}
-                            st.rerun()
+                        with st.spinner("Reading PDF..."):
+                            reader = pypdf.PdfReader(file)
+                            txt = "".join([p.extract_text() for p in reader.pages])
+                            plan = get_initial_plan(sub_pdf, file.name, txt)
+                            if plan:
+                                st.session_state.current_tasks = plan['tasks']
+                                st.session_state.user_details = {"sub": sub_pdf, "top": file.name, "ctx": txt}
+                                st.rerun()
     else:
+        # Gameplay
         st.info(f"Mission: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
             d = task['difficulty']
             st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{task["xp"]}</span><br>{html.escape(task["text"])}</div>', unsafe_allow_html=True)
             c1, c2 = st.columns(2)
-            c1.button("✅ Done", key=f"c{i}", on_click=handle_complete, args=(i,))
-            if c2.button("🎲 Reroll (-20)", key=f"r{i}"):
+            if c1.button("✅ Complete", key=f"done_{i}"):
+                st.session_state.xp += task['xp']
+                st.session_state.tasks_completed += 1
+                st.session_state.current_tasks[i]['text'] = get_new_task(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
+                st.rerun()
+            if c2.button("🎲 Reroll (-20)", key=f"roll_{i}"):
                 if st.session_state.xp >= 20:
                     st.session_state.xp -= 20
                     st.session_state.current_tasks[i]['text'] = get_new_task(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
                     st.rerun()
+        
+        if st.button("🏳️ Reset Mission"):
+            st.session_state.user_details = {}
+            st.rerun()
 
-# --- 8. Main ---
+# --- 6. Router ---
 with st.sidebar:
     st.title("🧠 BrainWash")
-    choice = st.radio("Menu", ["Arcade", "Profile"])
-if choice == "Arcade": render_arcade()
-else: render_profile()
+    page = st.radio("Navigate", ["Arcade", "Profile"])
+    st.divider()
+    st.write(f"XP: {st.session_state.xp}")
 
+if page == "Arcade": render_arcade()
+else: render_profile()
