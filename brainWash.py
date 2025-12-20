@@ -8,6 +8,7 @@ import time
 import pandas as pd
 from dotenv import load_dotenv
 
+# --- 1. Init & Config ---
 if "GOOGLE_API_KEY" in st.secrets:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 # ניסיון שני: משיכת המפתח מ-dotenv (בשביל המחשב המקומי)
@@ -104,7 +105,7 @@ def get_gemini_model():
     """Robust model finder."""
     if not API_KEY: return None
     try:
-        genai.configure(api_key=MY_API_KEY)
+        genai.configure(api_key=API_KEY)
         preferences = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
         available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for pref in preferences:
@@ -417,6 +418,3 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
-
-
-
