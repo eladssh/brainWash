@@ -1,6 +1,6 @@
-streamlit
-google-genai
-python-dotenv
-pypdf
-pandas
-numpy
+streamlit==1.40.0
+google-generativeai==0.8.3
+python-dotenv==1.0.1
+pypdf==5.1.0
+pandas==2.2.3
+numpy==1.26.4
