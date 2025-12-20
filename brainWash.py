@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 import json
 import os
 import pypdf
@@ -16,7 +16,7 @@ else:
 
 if API_KEY:
     # הגדרה של הספרייה היציבה
-    genai.configure(api_key=API_KEY)
+    client = genai.Client(api_key=API_KEY)
 else:
     st.error("Missing API Key! Please configure it in Secrets.")
     st.stop()
@@ -64,11 +64,9 @@ def extract_text_from_pdf(uploaded_file):
     except: return None
 
 def get_initial_plan(subject, topic, context_text=None):
-    # כאן הפתרון ל-404: הגדרת המודל בצורה פשוטה ללא v1beta
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
         source = f"PDF Content: {context_text[:10000]}" if context_text else f"Topic: {topic}"
-        
+
         prompt = f"""
         Gamify a study plan for {subject}: {topic}.
         Create 5 study micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
@@ -84,23 +82,32 @@ def get_initial_plan(subject, topic, context_text=None):
             ]
         }}
         """
-        response = model.generate_content(
-            prompt, 
-            generation_config={"response_mime_type": "application/json"}
+
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config={"response_mime_type": "application/json"}
         )
+
         return json.loads(response.text)
+
     except Exception as e:
         st.error(f"AI Error: {e}")
         return None
 
 def get_new_task(subject, topic, difficulty, context_text=None):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Create 1 new {difficulty} study task for {topic} in {subject}. Return ONLY the task text."
-        response = model.generate_content(prompt)
+
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+
         return response.text.strip()
     except:
         return "Complete a quick review of the main topic."
+
 
 # --- 4. Gamification ---
 BRAIN_LEVELS = [
@@ -228,3 +235,4 @@ with st.sidebar:
 
 if page == "🎮 Arcade Mode": render_arcade()
 else: render_profile()
+
