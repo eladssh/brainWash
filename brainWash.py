@@ -9,8 +9,11 @@ import pandas as pd
 from dotenv import load_dotenv
 
 # --- 1. Init & Config ---
-load_dotenv()
-api_key = st.secrets["MY_API_KEY"]
+if "GOOGLE_API_KEY" in st.secrets:
+    API_KEY = st.secrets["GOOGLE_API_KEY"]
+else:
+    load_dotenv()
+    API_KEY = os.getenv("GOOGLE_API_KEY")
 
 st.set_page_config(
     page_title="BrainWash: Arcade",
@@ -408,4 +411,5 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
 
