@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai  # ספרייה חדשה ומעודכנת
 import json
 import os
 import pypdf
@@ -9,16 +9,15 @@ import pandas as pd
 from dotenv import load_dotenv
 
 # --- 1. Init & Config ---
+# בדיקה חכמה איפה המפתח נמצא (ענן או מחשב)
 if "GOOGLE_API_KEY" in st.secrets:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 else:
     load_dotenv()
     API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if not API_KEY:
-    st.error("Missing API Key! Please configure it.")
-    st.stop()
-
+# יצירת ה-Client של גוגל (הגרסה החדשה)
+client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 st.set_page_config(
     page_title="BrainWash: Arcade",
@@ -27,6 +26,61 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+# ... כאן תשאיר את ה-CSS שלך כפי שהיה ...
+
+# --- 3. Logic & Helpers (הגרסה המעודכנת) ---
+
+def get_initial_plan(subject, topic, context_text=None):
+    if not client:
+        st.error("Missing API Client. Check your Key.")
+        return None
+
+    source = f"PDF Content: {context_text[:20000]}" if context_text else f"Topic: {topic}"
+
+    prompt = f"""
+    Gamify a study plan for {subject}: {topic}.
+    Create 5 study micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
+    Source information: {source}
+    Return STRICT JSON:
+    {{
+        "tasks": [
+            {{"text": "Task...", "difficulty": "Hard", "xp": 300}},
+            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
+            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
+            {{"text": "Task...", "difficulty": "Easy", "xp": 50}},
+            {{"text": "Task...", "difficulty": "Easy", "xp": 50}}
+        ]
+    }}
+    """
+    try:
+        # קריאה ל-API בפורמט החדש
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        if "429" in str(e):
+            st.warning("Too many requests! Gemini is busy. Wait a moment.")
+        else:
+            st.error(f"Gemini Error: {e}")
+        return None
+
+
+def get_new_task(subject, topic, difficulty, context_text=None):
+    if not client: return "Review previous notes."
+
+    prompt = f"Create 1 new {difficulty} study task for {topic} in {subject}. Return ONLY the task text string."
+    try:
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+        return response.text.strip()
+    except:
+        return "Complete a practice quiz on this topic."
 # --- 2. CSS Styles ---
 st.markdown("""
     <style>
@@ -416,4 +470,3 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
-
