@@ -1,28 +1,35 @@
 import streamlit as st
-import google.generativeai as genai
 import json
 import os
 import pypdf
 import html
 import pandas as pd
 from dotenv import load_dotenv
+from google import genai
 
-# --- 1. Init & Config ---
+# =========================
+# 1. Init & Config
+# =========================
 if "GOOGLE_API_KEY" in st.secrets:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 else:
     load_dotenv()
     API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if API_KEY:
-    genai.configure(api_key=API_KEY)
-else:
+if not API_KEY:
     st.error("Missing API Key! Please configure it in Secrets.")
     st.stop()
 
+client = genai.Client(api_key=API_KEY)
+
+# =========================
+# 2. Page Config
+# =========================
 st.set_page_config(page_title="BrainWash: Arcade", page_icon="🧠", layout="wide")
 
-# --- 2. CSS Styles ---
+# =========================
+# 3. CSS Styles (שלך – ללא שינוי)
+# =========================
 st.markdown("""
 <style>
 .stApp { background-color: #f0f2f6; }
@@ -32,11 +39,11 @@ st.markdown("""
     margin-bottom: 15px; transition: transform 0.2s;
 }
 .task-card:hover { transform: scale(1.01); }
-.diff-Hard { border-left-color: #ff4b4b; } 
-.diff-Medium { border-left-color: #ffa726; } 
-.diff-Easy { border-left-color: #66bb6a; } 
+.diff-Hard { border-left-color: #ff4b4b; }
+.diff-Medium { border-left-color: #ffa726; }
+.diff-Easy { border-left-color: #66bb6a; }
 .badge {
-    padding: 4px 8px; border-radius: 8px; color: white; 
+    padding: 4px 8px; border-radius: 8px; color: white;
     font-weight: bold; font-size: 0.8em; text-transform: uppercase;
 }
 .bg-Hard { background-color: #ff4b4b; }
@@ -46,7 +53,7 @@ st.markdown("""
     background: white; padding: 25px; border-radius: 20px;
     box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center;
 }
-.brain-avatar { 
+.brain-avatar {
     font-size: 80px; display: block; margin-bottom: 10px;
     animation: float 3s ease-in-out infinite;
 }
@@ -57,8 +64,33 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Logic & Helpers ---
+# =========================
+# 4. Gemini 2.0 + fallback
+# =========================
+MODELS = [
+    "models/gemini-2.0-flash",
+    "models/gemini-1.5-flash"
+]
 
+def call_ai(prompt, expect_json=False):
+    last_error = None
+
+    for model in MODELS:
+        try:
+            response = client.responses.create(
+                model=model,
+                input=prompt,
+                response_format={"type": "json_object"} if expect_json else None
+            )
+            return response.output_text
+        except Exception as e:
+            last_error = e
+
+    raise RuntimeError(f"All models failed. Last error: {last_error}")
+
+# =========================
+# 5. Helpers (שלך, עם AI מתוקן)
+# =========================
 def extract_text_from_pdf(uploaded_file):
     try:
         pdf_reader = pypdf.PdfReader(uploaded_file)
@@ -68,32 +100,30 @@ def extract_text_from_pdf(uploaded_file):
 
 def get_initial_plan(subject, topic, context_text=None):
     try:
-        model = genai.GenerativeModel("gemini-pro")
-
-        source = f"PDF Content: {context_text[:8000]}" if context_text else f"Topic: {topic}"
+        source = context_text[:8000] if context_text else topic
 
         prompt = f"""
 Gamify a study plan for {subject}: {topic}.
-Create 5 study micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
 Source: {source}
 
-Return ONLY a JSON object:
+Create exactly 5 study micro-tasks:
+1 Hard (300 XP)
+2 Medium (150 XP)
+2 Easy (50 XP)
+
+Return ONLY valid JSON:
 {{
   "tasks": [
-    {{"text": "Task description", "difficulty": "Hard", "xp": 300}},
-    {{"text": "Task description", "difficulty": "Medium", "xp": 150}},
-    {{"text": "Task description", "difficulty": "Medium", "xp": 150}},
-    {{"text": "Task description", "difficulty": "Easy", "xp": 50}},
-    {{"text": "Task description", "difficulty": "Easy", "xp": 50}}
+    {{"text": "...", "difficulty": "Hard", "xp": 300}},
+    {{"text": "...", "difficulty": "Medium", "xp": 150}},
+    {{"text": "...", "difficulty": "Medium", "xp": 150}},
+    {{"text": "...", "difficulty": "Easy", "xp": 50}},
+    {{"text": "...", "difficulty": "Easy", "xp": 50}}
   ]
 }}
 """
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-
-        return json.loads(response.text)
+        raw = call_ai(prompt, expect_json=True)
+        return json.loads(raw)
 
     except Exception as e:
         st.error(f"AI Error: {e}")
@@ -101,19 +131,19 @@ Return ONLY a JSON object:
 
 def get_new_task(subject, topic, difficulty, context_text=None):
     try:
-        model = genai.GenerativeModel("gemini-pro")
-
         prompt = f"""
-Create 1 new {difficulty} study task for {topic} in {subject}.
+Create 1 new {difficulty} study task.
+Subject: {subject}
+Topic: {topic}
 Return ONLY the task text.
 """
-        response = model.generate_content(prompt)
-        return response.text.strip()
-
+        return call_ai(prompt).strip()
     except:
         return "Complete a quick review of the main topic."
 
-# --- 4. Gamification ---
+# =========================
+# 6. Gamification (שלך – ללא שינוי)
+# =========================
 BRAIN_LEVELS = [
     (0, "🧟 Brain Rot", "You are losing neurons!"),
     (300, "🧠 Brain Builder", "Building momentum..."),
@@ -132,7 +162,9 @@ def get_brain_status(xp):
             next_limit = BRAIN_LEVELS[i+1][0] if i+1 < len(BRAIN_LEVELS) else xp * 1.5
     return current, next_limit
 
-# --- 5. Event Handlers ---
+# =========================
+# 7. Event Handlers (שלך)
+# =========================
 def handle_complete(index):
     task = st.session_state.current_tasks[index]
     st.session_state.xp += task['xp']
@@ -169,7 +201,9 @@ def handle_reroll(index):
 
     st.toast("🎲 Rerolled! -20 XP")
 
-# --- 6. Session State ---
+# =========================
+# 8. Session State (שלך)
+# =========================
 if "xp" not in st.session_state:
     st.session_state.xp = 0
 if "tasks_completed" not in st.session_state:
@@ -179,7 +213,9 @@ if "current_tasks" not in st.session_state:
 if "user_details" not in st.session_state:
     st.session_state.user_details = {}
 
-# --- 7. Page Renderers ---
+# =========================
+# 9. Renderers (שלך)
+# =========================
 def render_profile():
     st.title("👤 Brain Profile")
     (lvl_xp, lvl_title, lvl_desc), next_xp = get_brain_status(st.session_state.xp)
@@ -260,7 +296,9 @@ def render_arcade():
             st.session_state.current_tasks = []
             st.rerun()
 
-# --- 8. Router ---
+# =========================
+# 10. Router (שלך)
+# =========================
 with st.sidebar:
     st.title("BrainWash")
     page = st.radio("Menu", ["🎮 Arcade Mode", "👤 Profile"])
