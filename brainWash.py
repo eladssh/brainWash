@@ -4,6 +4,7 @@ import os
 import pypdf
 import html
 import pandas as pd
+import time
 from dotenv import load_dotenv
 from google import genai
 
@@ -68,34 +69,30 @@ st.markdown("""
 # 4. Gemini 2.0 + fallback
 # =========================
 MODELS = [
-    "models/gemini-2.0-flash"
+    "models/gemini-1.5-flash", # יציב יותר, מכסה גדולה יותר
+    "models/gemini-1.5-pro",   # חזק יותר, אם המכסה מאפשרת
+    "models/gemini-2.0-flash-exp" # נסה להשתמש בשם המלא של הניסיוני
 ]
-
 def call_ai(prompt, expect_json=False):
     last_error = None
-
     for model in MODELS:
         try:
-            # הגדרת הקונפיגורציה
-            config = None
-            if expect_json:
-                # הגדרת הפלט כ-JSON
-                config = {"response_mime_type": "application/json"}
-
-            # השם הנכון של המתודה הוא generate_content
+            config = {"response_mime_type": "application/json"} if expect_json else None
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
                 config=config
             )
-            
-            # שליפת הטקסט מהתגובה
             return response.text
-            
         except Exception as e:
             last_error = e
+            if "429" in str(e):
+                st.warning(f"מודל {model} עמוס, מנסה את הבא...")
+                time.sleep(2) # מחכה קצת לפני הניסיון הבא
+            continue 
 
-    raise RuntimeError(f"All models failed. Last error: {last_error}")
+    raise RuntimeError(f"כל המודלים נכשלו. שגיאה אחרונה: {last_error}")
+
 
 # =========================
 # 5. Helpers (שלך, עם AI מתוקן)
@@ -318,6 +315,7 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
 
 
 
