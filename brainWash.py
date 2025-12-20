@@ -1,10 +1,8 @@
 import streamlit as st
-from google import genai
-import json
+import google.generativeai as genai  # זו הדרך הישנה והעובדת
 import os
 import pypdf
-import html
-import pandas as pd
+import json
 from dotenv import load_dotenv
 
 # --- 1. Init & Config ---
@@ -171,3 +169,4 @@ with st.sidebar:
 
 if page == "Arcade": render_arcade()
 else: render_profile()
+
