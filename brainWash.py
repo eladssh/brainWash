@@ -16,7 +16,10 @@ else:
 
 if API_KEY:
     # הגדרה של הספרייה היציבה
-    client = genai.Client(api_key=API_KEY)
+    client = genai.Client(
+    api_key=API_KEY,
+    transport="rest"
+)
 else:
     st.error("Missing API Key! Please configure it in Secrets.")
     st.stop()
@@ -84,7 +87,7 @@ def get_initial_plan(subject, topic, context_text=None):
         """
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-1.5-flash-latest",
             contents=prompt,
             config={"response_mime_type": "application/json"}
         )
@@ -235,4 +238,5 @@ with st.sidebar:
 
 if page == "🎮 Arcade Mode": render_arcade()
 else: render_profile()
+
 
