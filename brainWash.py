@@ -77,16 +77,25 @@ def call_ai(prompt, expect_json=False):
 
     for model in MODELS:
         try:
-            response = client.responses.create(
+            # הגדרת הקונפיגורציה ל-JSON במידת הצורך
+            config = None
+            if expect_json:
+                config = {"response_mime_type": "application/json"}
+
+            response = client.models.generate(
                 model=model,
-                input=prompt,
-                response_format={"type": "json_object"} if expect_json else None
+                contents=prompt,
+                config=config
             )
-            return response.output_text
+            
+            # בספרייה החדשה משתמשים ב-.text כדי לקבל את התשובה
+            return response.text
+            
         except Exception as e:
             last_error = e
 
     raise RuntimeError(f"All models failed. Last error: {last_error}")
+
 
 # =========================
 # 5. Helpers (שלך, עם AI מתוקן)
@@ -309,3 +318,4 @@ if page == "🎮 Arcade Mode":
     render_arcade()
 else:
     render_profile()
+
