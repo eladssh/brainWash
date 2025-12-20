@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai  # הספרייה החדשה בלבד
 import json
 import os
 import pypdf
@@ -14,12 +14,8 @@ else:
     load_dotenv()
     API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if API_KEY:
-    # הגדרת ה-API בצורה היציבה ביותר
-    genai.configure(api_key=API_KEY)
-else:
-    st.error("Missing API Key! Please configure it in Streamlit Secrets.")
-    st.stop()
+# יצירת Client בפורמט החדש
+client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 st.set_page_config(
     page_title="BrainWash: Arcade",
@@ -56,10 +52,7 @@ st.markdown("""
         font-size: 80px; display: block; margin-bottom: 10px;
         animation: float 3s ease-in-out infinite;
     }
-    @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-    }
+    @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
     </style>
 """, unsafe_allow_html=True)
 
@@ -74,43 +67,44 @@ def extract_text_from_pdf(uploaded_file):
         return None
 
 def get_initial_plan(subject, topic, context_text=None):
-    # שימוש במודל יציב ללא קידומת מיותרת
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    source = f"PDF Content: {context_text[:10000]}" if context_text else f"Topic: {topic}"
+    if not client: return None
+    source = f"PDF Content: {context_text[:15000]}" if context_text else f"Topic: {topic}"
     
     prompt = f"""
     Gamify a study plan for {subject}: {topic}.
     Create 5 study micro-tasks sorted by difficulty (1 Hard, 2 Medium, 2 Easy).
     Source: {source}
-    Return ONLY a JSON object:
+    Return STRICT JSON:
     {{
         "tasks": [
-            {{"text": "Task...", "difficulty": "Hard", "xp": 300}},
-            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
-            {{"text": "Task...", "difficulty": "Medium", "xp": 150}},
-            {{"text": "Task...", "difficulty": "Easy", "xp": 50}},
-            {{"text": "Task...", "difficulty": "Easy", "xp": 50}}
+            {{"text": "Task description", "difficulty": "Hard", "xp": 300}},
+            {{"text": "Task description", "difficulty": "Medium", "xp": 150}},
+            {{"text": "Task description", "difficulty": "Medium", "xp": 150}},
+            {{"text": "Task description", "difficulty": "Easy", "xp": 50}},
+            {{"text": "Task description", "difficulty": "Easy", "xp": 50}}
         ]
     }}
     """
     try:
-        response = model.generate_content(
-            prompt, 
-            generation_config={"response_mime_type": "application/json"}
+        # הקריאה החדשה ב-SDK החדש
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config={'response_mime_type': 'application/json'}
         )
         return json.loads(response.text)
     except Exception as e:
-        st.error(f"Gemini API Error: {e}")
+        st.error(f"AI Error: {e}")
         return None
 
 def get_new_task(subject, topic, difficulty, context_text=None):
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    if not client: return "Review notes."
     prompt = f"Create 1 new {difficulty} study task for {topic} in {subject}. Return ONLY the task text."
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
         return response.text.strip()
     except:
-        return "Complete a quick review of your notes."
+        return "Complete a practice quiz."
 
 # --- 4. Gamification ---
 BRAIN_LEVELS = [
@@ -137,15 +131,12 @@ def handle_complete(index):
     st.session_state.xp += task['xp']
     st.session_state.tasks_completed += 1
     
-    with st.spinner("Generating next task..."):
-        new_text = get_new_task(
-            st.session_state.user_details['sub'], 
-            st.session_state.user_details['top'], 
-            task['difficulty'], 
-            st.session_state.user_details.get('pdf_text')
-        )
-        st.session_state.current_tasks[index] = {"text": new_text, "difficulty": task['difficulty'], "xp": task['xp']}
+    new_text = get_new_task(st.session_state.user_details['sub'], 
+                            st.session_state.user_details['top'], 
+                            task['difficulty'], 
+                            st.session_state.user_details.get('pdf_text'))
     
+    st.session_state.current_tasks[index] = {"text": new_text, "difficulty": task['difficulty'], "xp": task['xp']}
     if task['difficulty'] == "Hard": st.balloons()
     st.toast(f"✅ +{task['xp']} XP!")
 
@@ -155,14 +146,11 @@ def handle_reroll(index):
         return
     st.session_state.xp -= 20
     task = st.session_state.current_tasks[index]
-    with st.spinner("Rerolling..."):
-        new_text = get_new_task(
-            st.session_state.user_details['sub'], 
-            st.session_state.user_details['top'], 
-            task['difficulty'], 
-            st.session_state.user_details.get('pdf_text')
-        )
-        st.session_state.current_tasks[index]['text'] = new_text
+    new_text = get_new_task(st.session_state.user_details['sub'], 
+                            st.session_state.user_details['top'], 
+                            task['difficulty'], 
+                            st.session_state.user_details.get('pdf_text'))
+    st.session_state.current_tasks[index]['text'] = new_text
     st.toast("🎲 Rerolled! -20 XP")
 
 # --- 6. Session State ---
@@ -175,29 +163,25 @@ if "user_details" not in st.session_state: st.session_state.user_details = {}
 def render_profile():
     st.title("👤 Brain Profile")
     (lvl_xp, lvl_title, lvl_desc), next_xp = get_brain_status(st.session_state.xp)
-    
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"""<div class="profile-card"><div class="brain-avatar">{lvl_title.split()[0]}</div>
-        <h3>{lvl_title}</h3><p>{lvl_desc}</p></div>""", unsafe_allow_html=True)
+        st.markdown(f'<div class="profile-card"><div class="brain-avatar">{lvl_title.split()[0]}</div><h3>{lvl_title}</h3><p>{lvl_desc}</p></div>', unsafe_allow_html=True)
     with c2:
         st.metric("Total XP", st.session_state.xp)
         st.metric("Quests Done", st.session_state.tasks_completed)
     with c3:
         prog = (st.session_state.xp - lvl_xp) / (next_xp - lvl_xp) if next_xp > lvl_xp else 1.0
-        st.write("Next Level Progress")
+        st.write("Progress to Next Rank")
         st.progress(min(max(prog, 0.0), 1.0))
 
 def render_arcade():
     st.title("🎮 Arcade Mode")
-    
     if not st.session_state.user_details:
         col1, col2 = st.columns(2)
         with col1:
             with st.form("manual"):
-                st.subheader("Manual Mission")
                 sub = st.text_input("Subject", "Computer Science")
-                top = st.text_input("Topic", "Data Structures")
+                top = st.text_input("Topic", "Algorithms")
                 if st.form_submit_button("Start Game"):
                     with st.spinner("Generating..."):
                         data = get_initial_plan(sub, top)
@@ -206,9 +190,8 @@ def render_arcade():
                             st.session_state.user_details = {"sub": sub, "top": top}
                             st.rerun()
         with col2:
-            with st.form("pdf_form"):
-                st.subheader("PDF Mission")
-                pdf_sub = st.text_input("Subject", "Biology")
+            with st.form("pdf"):
+                pdf_sub = st.text_input("Subject", "Science")
                 f = st.file_uploader("Upload PDF", type="pdf")
                 if st.form_submit_button("Analyze & Play"):
                     if f:
@@ -222,24 +205,23 @@ def render_arcade():
     else:
         st.info(f"Active Mission: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
-            diff = task['difficulty']
-            st.markdown(f"""<div class="task-card diff-{diff}">
-                <span class="badge bg-{diff}">{diff} | +{task['xp']} XP</span>
-                <p style="font-size:1.1em; margin-top:10px;">{task['text']}</p></div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="task-card diff-{task["difficulty"]}"><span class="badge bg-{task["difficulty"]}">{task["difficulty"]} | +{task["xp"]} XP</span><p style="margin-top:10px;">{task["text"]}</p></div>', unsafe_allow_html=True)
             b1, b2 = st.columns(2)
             with b1: st.button("✅ Complete", key=f"c{i}", on_click=handle_complete, args=(i,), use_container_width=True)
             with b2: st.button("🎲 Reroll", key=f"r{i}", on_click=handle_reroll, args=(i,), use_container_width=True)
-        
         if st.button("🏳️ End Mission"):
             st.session_state.user_details = {}
             st.session_state.current_tasks = []
             st.rerun()
 
 # --- 8. Router ---
+if not API_KEY:
+    st.error("Missing API Key.")
+    st.stop()
+
 with st.sidebar:
     st.title("BrainWash")
     page = st.radio("Menu", ["🎮 Arcade Mode", "👤 Profile"])
-    st.divider()
     st.write(f"**XP:** {st.session_state.xp}")
 
 if page == "🎮 Arcade Mode": render_arcade()
