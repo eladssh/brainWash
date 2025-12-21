@@ -21,7 +21,7 @@ else:
             with st.spinner("ממתין לתשובה מגוגל..."):
                 # 3. קריאה פשוטה למודל
                 response = client.models.generate_content(
-                    model='gemini-2.0-flash', 
+                    model='gemini-1.5-flash', 
                     contents="האם אתה שומע אותי? תענה בקיצור: 'החיבור תקין!'"
                 )
                 
@@ -32,3 +32,4 @@ else:
     except Exception as e:
         st.error("נכשלו הניסיונות ליצור קשר עם ה-API.")
         st.exception(e) # זה ידפיס לנו בדיוק מה הבעיה אם תהיה כזו
+
