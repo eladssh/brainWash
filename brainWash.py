@@ -8,7 +8,6 @@ import html
 import pandas as pd
 from dotenv import load_dotenv
 
-# --- 1. Init & Config ---
 load_dotenv()
 API_KEY = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
@@ -18,12 +17,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS Styles (מעודכן לעיצוב פרופיל פרימיום) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f0f2f6; }
     
-    /* כרטיסי פרופיל */
     .profile-card {
         background: white; padding: 30px; border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;
@@ -44,7 +41,6 @@ st.markdown("""
         50% { transform: translateY(-15px); }
     }
 
-    /* רשימת חברים */
     .friend-row {
         display: flex; align-items: center; justify-content: space-between;
         padding: 12px; border-bottom: 1px solid #f1f1f1;
@@ -53,7 +49,6 @@ st.markdown("""
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
 
-    /* כרטיסי משימה בארקייד */
     .task-card {
         background: white; padding: 20px; border-radius: 12px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 10px solid #ddd;
@@ -65,7 +60,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. AI Core (ללא שינוי כפי שביקשת) ---
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -133,12 +127,9 @@ def get_brain_status(xp):
             next_limit = BRAIN_LEVELS[i+1][0] if i+1 < len(BRAIN_LEVELS) else xp * 1.5
     return current, next_limit
 
-# --- 5. UI Renderers ---
-
 def render_profile():
     st.title("👤 Brain Profile")
     
-    # ניהול שם משתמש
     with st.expander("📝 Edit Profile"):
         new_name = st.text_input("Username", st.session_state.user_name)
         if st.button("Save Changes"):
@@ -150,7 +141,6 @@ def render_profile():
     col1, col2, col3 = st.columns([1, 1, 1])
     
     with col1:
-        # כרטיס אוואטר ודרגה
         emoji = lvl_title.split()[0]
         st.markdown(f"""
             <div class="profile-card">
@@ -163,19 +153,17 @@ def render_profile():
         """, unsafe_allow_html=True)
 
     with col2:
-        # סטטיסטיקות מפורטות
         st.markdown('<div class="profile-card">', unsafe_allow_html=True)
         st.subheader("📊 Statistics")
         st.markdown(f"""
             <div class="stat-box"><strong>Total XP:</strong> {st.session_state.xp}</div>
             <div class="stat-box"><strong>Tasks Done:</strong> {st.session_state.tasks_completed}</div>
-            <div class="stat-box"><strong>Day Streak:</strong> 🔥 3 Days</div>
+            <div class="stat-box"><strong>Day Streak:</strong> 🔥 ONE Day</div>
             <div class="stat-box"><strong>Global Rank:</strong> #1,240</div>
         """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
-        # רשימת חברים
         st.markdown('<div class="profile-card">', unsafe_allow_html=True)
         st.subheader("👥 Study Buddies")
         friends = [
@@ -196,7 +184,6 @@ def render_profile():
         st.button("➕ Add Friend", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # גרף התקדמות
     st.divider()
     st.subheader("📈 Learning Progress")
     chart_data = pd.DataFrame({'Week': ['W1', 'W2', 'W3', 'W4'], 'XP': [400, 700, 500, st.session_state.xp]})
@@ -281,3 +268,4 @@ with st.sidebar:
 
 if page == "Arcade": render_arcade()
 else: render_profile()
+
