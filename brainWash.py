@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+import google as genai
 import json
 import os
 import pypdf
@@ -46,7 +46,7 @@ st.markdown("""
 def get_ai_response(prompt, is_json=False):
     """מנסה שמות שונים של מודלים כדי לעקוף את שגיאת ה-404 בענן"""
     # רשימה של שמות מודלים אפשריים בגרסה הישנה
-    model_names = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-001']
+    model_names = ['gemini-2.5-flash', 'gemini-2.5-flash-latest', 'gemini-2.5-flash-001']
     
     config = {"response_mime_type": "application/json"} if is_json else None
 
@@ -177,3 +177,4 @@ if not API_KEY:
 else:
     if choice == "Arcade": render_arcade()
     else: render_profile()
+
