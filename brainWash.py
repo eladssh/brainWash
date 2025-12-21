@@ -52,7 +52,7 @@ def get_ai_response(prompt, is_json=False):
     if not client: return None
     
     # שימוש בדגם הכי חדש: gemini-2.0-flash
-    model_id = "gemini-2.0-flash"
+    model_id = "gemini-2.5-flash"
     
     config = types.GenerateContentConfig(
         temperature=0.7,
@@ -165,3 +165,4 @@ with st.sidebar:
 
 if page == "Arcade": render_arcade()
 else: render_profile()
+
