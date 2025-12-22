@@ -20,12 +20,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS Styles (המלוטש ביותר) ---
+# --- 2. CSS Styles ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
-    /* עיצוב כרטיסים גנרי לכל המערכת */
+    /* קוביות עיצוב לבנות */
     .white-card {
         background: white; padding: 25px; border-radius: 15px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
@@ -69,14 +69,14 @@ st.markdown("""
 # --- 3. AI Core ---
 def get_ai_client():
     if not API_KEY:
-        st.error("Missing API Key! Please add GOOGLE_API_KEY to Secrets.")
+        st.error("Missing API Key!")
         return None
     return genai.Client(api_key=API_KEY)
 
 def get_ai_response(prompt, is_json=False):
     client = get_ai_client()
     if not client: return None
-    model_id = "gemini-2.5-flash" # ודא שזה המודל שקיים בחשבון שלך
+    model_id = "gemini-2.5-flash" 
     config = types.GenerateContentConfig(
         temperature=0.7,
         response_mime_type="application/json" if is_json else "text/plain"
@@ -89,7 +89,7 @@ def get_ai_response(prompt, is_json=False):
         return None
 
 def get_initial_plan(subject, topic, context=""):
-    prompt = f"Create a study plan for {subject}: {topic}. {f'Context: {context[:5000]}' if context else ''} Return 5 tasks (1 Hard, 2 Medium, 2 Easy) with brief solutions in JSON format."
+    prompt = f"Create a study plan for {subject}: {topic}. {f'Context: {context[:5000]}' if context else ''} Return 5 tasks (1 Hard, 2 Medium, 2 Easy) with solutions in JSON format."
     res = get_ai_response(prompt, is_json=True)
     return json.loads(res) if res else None
 
@@ -130,7 +130,7 @@ def render_profile():
     with st.expander("📝 Edit Identity"):
         st.session_state.user_name = st.text_input("Username", st.session_state.user_name)
 
-    (lvl_xp, lvl_title, lvl_desc), next_lim = get_brain_status(st.session_state.xp)
+    (lvl_xp, lvl_title), next_limit = get_brain_status(st.session_state.xp)
     
     col1, col2, col3 = st.columns(3)
     
@@ -140,7 +140,7 @@ def render_profile():
                 <div class="brain-avatar">🧠</div>
                 <h2>{st.session_state.user_name}</h2>
                 <h4 style="color: #7F00FF;">{lvl_title}</h4>
-                <p>Current Level: {int(st.session_state.xp / 500) + 1}</p>
+                <p>Level {int(st.session_state.xp / 500) + 1}</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -149,7 +149,7 @@ def render_profile():
         st.subheader("📊 Statistics")
         st.write(f"**Total XP:** {st.session_state.xp}")
         st.write(f"**Quests Done:** {st.session_state.tasks_completed}")
-        st.write(f"**Global Rank:** #1,240")
+        st.write(f"**Streak:** 🔥 3 Days")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
@@ -185,29 +185,29 @@ def render_profile():
     st.divider()
     st.subheader("⏲️ Focus Mode")
     with st.expander("Start Deep Work Session"):
-        focus_mins = st.slider("Select Minutes", 5, 120, 25)
-        if st.button("Start Timer"):
-            st.warning(f"Focus Mode Active for {focus_mins} minutes! Don't switch tabs.")
-            # פונקציית טיימר פשוטה (בפרויקט אמיתי עדיף JS, כאן זה להדגמה)
+        focus_mins = st.slider("Minutes", 5, 120, 25)
+        if st.button("Start Focus Timer"):
             placeholder = st.empty()
             for seconds in range(focus_mins * 60, 0, -1):
                 mins, secs = divmod(seconds, 60)
                 placeholder.metric("Time Remaining", f"{mins:02d}:{secs:02d}")
                 time.sleep(1)
-            st.success("Session Complete! +50 Focus XP")
+            st.balloons()
+            st.success("Focus Session Complete! +50 XP")
             st.session_state.xp += 50
+            st.rerun()
 
 def render_arcade():
     st.markdown("""
         <div class="intro-text">
             <h2>Welcome to BrainWash Arcade 🎮</h2>
-            <p>Turn your study materials into an RPG adventure. Upload a PDF or search a topic to generate active learning quests. 
+            <p>Turn study materials into an RPG adventure. Upload a PDF or search a topic to generate active quests. 
             Earn XP, unlock ranks, and master your subjects!</p>
         </div>
     """, unsafe_allow_html=True)
 
     if not st.session_state.user_details:
-        t1, t2 = st.tabs(["🔍 Search", "📄 PDF Intelligence"])
+        t1, t2 = st.tabs(["🔍 Search", "📄 PDF Scan"])
         with t1:
             with st.form("manual"):
                 sub = st.text_input("Subject")
@@ -225,7 +225,7 @@ def render_arcade():
                     if f:
                         reader = pypdf.PdfReader(f)
                         txt = "".join([p.extract_text() for p in reader.pages])
-                        plan = get_initial_plan("PDF Study", f.name, txt)
+                        plan = get_initial_plan("PDF", f.name, txt)
                         if plan:
                             st.session_state.current_tasks = plan['tasks']
                             st.session_state.user_details = {"sub": "PDF", "top": f.name}
@@ -250,22 +250,22 @@ def render_arcade():
                         new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
                         st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
                         st.rerun()
-            with st.expander("💡 View Solution"):
-                st.write(task.get('solution', 'Check your notes!'))
+            with st.expander("💡 Solution"):
+                st.write(task.get('solution', 'No solution found.'))
 
-        if st.button("🏳️ Reset"):
+        if st.button("🏳️ Reset Session"):
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 6. Router ---
+# --- 6. Sidebar & Router ---
 with st.sidebar:
     st.title("🧠 BrainWash")
-    st.write(f"Logged in as: **{st.session_state.user_name}**")
+    st.write(f"User: **{st.session_state.user_name}**")
     
-    # Status Bar בסידבר
-    (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
+    # תיקון ה-Unpacking בשורת הסטטוס בסיידבר
+    (lvl_xp, lvl_title), next_limit = get_brain_status(st.session_state.xp)
     sidebar_prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
-    st.write(f"Rank Progress: **{lvl_title}**")
+    st.write(f"Rank: **{lvl_title}**")
     st.progress(sidebar_prog)
     
     st.divider()
