@@ -20,20 +20,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS Styles (תיקון פרופורציות וגלישה) ---
+# --- 2. CSS Styles (תיקון פרופורציות ואחידות) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
+    /* קוביות לבנות אחידות לפרופיל */
     .white-card {
         background: white; padding: 25px; border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         border: 1px solid #eef2f6; 
         margin-bottom: 20px;
         text-align: center;
-        height: auto;
-        min-height: 320px;
-        overflow: hidden; /* מונע מהמלל לצאת מהקוביה */
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        height: 350px; /* גובה קבוע לכל הקוביות העליונות ליצירת קו ישר */
+        overflow-y: auto; /* מאפשר גלילה אם יש הרבה חברים */
     }
     
     .task-card {
@@ -45,25 +48,28 @@ st.markdown("""
     .diff-Medium { border-left-color: #ffa726; } 
     .diff-Easy { border-left-color: #66bb6a; } 
 
-    .badge-card { text-align: center; padding: 10px; }
-    .badge-icon { font-size: 45px; margin-bottom: 5px; }
+    .badge-card { 
+        background: white; padding: 15px; border-radius: 15px;
+        border: 1px solid #eef2f6; text-align: center; min-height: 160px;
+    }
+    .badge-icon { font-size: 40px; margin-bottom: 5px; }
     .locked { filter: grayscale(100%); opacity: 0.3; }
 
     .brain-avatar { 
-        font-size: 80px; display: block; margin-bottom: 15px;
+        font-size: 70px; display: block; margin-bottom: 10px;
         animation: float 3s ease-in-out infinite;
     }
     @keyframes float {
         0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-15px); }
+        50% { transform: translateY(-10px); }
     }
 
     .friend-row {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 8px 0; border-bottom: 1px solid #f8f9fa;
-        font-size: 0.9em;
+        padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        width: 100%;
     }
-    .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
     
@@ -74,7 +80,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. AI Core ---
+# --- 3. AI Core (לא נגענו בהגדרות המודל) ---
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -91,6 +97,7 @@ def get_ai_response(prompt, is_json=False):
     )
     try:
         response = client.models.generate_content(model=model_id, contents=prompt, config=config)
+        # ניקוי תגיות Markdown במקרה שהן חוזרות
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return clean_text
     except Exception as e:
@@ -145,7 +152,7 @@ def render_profile():
     with st.expander("📝 Edit Identity"):
         st.session_state.user_name = st.text_input("Username", st.session_state.user_name)
 
-    (lvl_xp, lvl_title), next_lim = get_brain_status(st.session_state.xp)
+    (lvl_xp, lvl_title), next_limit = get_brain_status(st.session_state.xp)
     
     col1, col2, col3 = st.columns(3)
     
@@ -154,7 +161,7 @@ def render_profile():
             <div class="white-card">
                 <div class="brain-avatar">🧠</div>
                 <h2 style="margin:0;">{st.session_state.user_name}</h2>
-                <h4 style="color: #7F00FF; margin-top:5px;">{lvl_title}</h4>
+                <h4 style="color: #7F00FF; margin-top:10px;">{lvl_title}</h4>
                 <p>Level {int(st.session_state.xp / 500) + 1}</p>
             </div>
         """, unsafe_allow_html=True)
@@ -163,11 +170,10 @@ def render_profile():
         st.markdown(f"""
             <div class="white-card">
                 <h3 style="margin-top:0;">📊 Statistics</h3>
-                <div style="text-align:left; margin-top:20px;">
+                <div style="text-align:left; margin-top:20px; font-size:1.1em;">
                     <p><strong>Total XP:</strong> {st.session_state.xp}</p>
                     <p><strong>Quests Done:</strong> {st.session_state.tasks_completed}</p>
                     <p><strong>Day Streak:</strong> 🔥 3 Days</p>
-                    <p><strong>Global Rank:</strong> #1,240</p>
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -177,7 +183,7 @@ def render_profile():
         friends = [("Sarah_Brains", "online"), ("Mike_The_Wiz", "online"), ("Lazy_Dave", "offline")]
         for name, status in friends:
             dot = "online" if status == "online" else "offline"
-            st.markdown(f'<div class="friend-row"><span style="overflow:hidden; text-overflow:ellipsis;">{name}</span><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="friend-row"><span>{name}</span><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
         st.write("")
         st.button("➕ Add Buddy", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -194,27 +200,26 @@ def render_profile():
         with badge_cols[i]:
             status = "locked" if is_locked else ""
             st.markdown(f"""
-                <div class="white-card badge-card {status}" style="min-height:180px;">
+                <div class="badge-card {status}">
                     <div class="badge-icon">{ach['emoji']}</div>
                     <strong>{ach['name']}</strong><br><small>{ach['desc']}</small>
                 </div>
             """, unsafe_allow_html=True)
 
-    # Focus Mode
+    # Focus Mode (עם כפתור עצירה)
     st.divider()
     st.subheader("⏲️ Focus Mode")
     with st.expander("Start Deep Work Session"):
         focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
-        
         c_start, c_stop = st.columns(2)
+        
         if c_start.button("🚀 Start Timer", use_container_width=True, type="primary"):
             placeholder = st.empty()
-            # כפתור עצירה שמופיע רק כשהטיימר רץ
-            stop_btn = c_stop.button("🛑 Stop Timer", use_container_width=True)
-            
+            # יצירת כפתור עצירה שמרענן את הדף
+            if c_stop.button("🛑 Stop Session", use_container_width=True):
+                st.rerun()
+                
             for seconds in range(focus_mins * 60, 0, -1):
-                if stop_btn: # במידה ולחצו על עצירה
-                    st.rerun()
                 mins, secs = divmod(seconds, 60)
                 placeholder.metric("Concentration Remaining", f"{mins:02d}:{secs:02d}")
                 time.sleep(1)
@@ -228,9 +233,15 @@ def render_arcade():
     st.markdown("""
         <div class="intro-text">
             <h2 style="margin:0;">Welcome to BrainWash Arcade 🎮</h2>
-            <p style="margin-bottom:0;">Turn your study materials into an RPG adventure.</p>
+            <p style="margin-bottom:0;">Turn your study materials into an RPG adventure. Upload a PDF or search a topic to generate active learning quests.</p>
         </div>
     """, unsafe_allow_html=True)
+
+    # Progress Header
+    (lvl_xp, lvl_title), next_limit = get_brain_status(st.session_state.xp)
+    sidebar_prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
+    st.write(f"**Rank:** {lvl_title} ({st.session_state.xp} XP)")
+    st.progress(sidebar_prog)
 
     if not st.session_state.user_details:
         t1, t2 = st.tabs(["🔍 Search", "📄 PDF Scan"])
@@ -240,13 +251,12 @@ def render_arcade():
                 top = st.text_input("Topic", "Matrices")
                 if st.form_submit_button("Launch Mission", use_container_width=True):
                     plan = get_initial_plan(sub, top)
-                    # תיקון ה-TypeError: בדיקה ש-plan הוא מילון
                     if plan and isinstance(plan, dict) and 'tasks' in plan:
                         st.session_state.current_tasks = plan['tasks']
                         st.session_state.user_details = {"sub": sub, "top": top}
                         st.rerun()
                     else:
-                        st.error("Could not generate a valid study plan. Please try again.")
+                        st.error("Failed to generate mission. Try again.")
         with t2:
             with st.form("pdf"):
                 f = st.file_uploader("Upload PDF", type="pdf")
@@ -259,36 +269,38 @@ def render_arcade():
                             st.session_state.current_tasks = plan['tasks']
                             st.session_state.user_details = {"sub": "PDF", "top": f.name}
                             st.rerun()
-                        else:
-                            st.error("Could not analyze the PDF. Please try again.")
     else:
         st.subheader(f"📍 Objective: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
-            d, xp = task['difficulty'], task['xp']
-            st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{xp} XP</span><br>{html.escape(task["text"])}</div>', unsafe_allow_html=True)
+            # פתרון ה-KeyError: שימוש ב-.get() כדי למנוע קריסה אם המפתח חסר
+            d = task.get('difficulty', 'Medium')
+            xp_reward = task.get('xp', 50)
+            
+            st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{xp_reward} XP</span><br>{html.escape(task.get("text", "No task text"))}</div>', unsafe_allow_html=True)
+            
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("✅ Success", key=f"d{i}", use_container_width=True, type="primary"):
-                    st.session_state.xp += xp
+                    st.session_state.xp += xp_reward
                     st.session_state.tasks_completed += 1
                     new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
-                    st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                    st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                     st.rerun()
             with c2:
                 if st.button("🎲 Reroll", key=f"r{i}", use_container_width=True):
                     if st.session_state.xp >= 20:
                         st.session_state.xp -= 20
                         new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
-                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                         st.rerun()
             with st.expander("💡 View Solution"):
-                st.write(task.get('solution', 'Check your notes!'))
+                st.write(task.get('solution', 'Check your materials.'))
 
         if st.button("🏳️ Reset Session", use_container_width=True):
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 6. Sidebar ---
+# --- 6. Router ---
 with st.sidebar:
     st.title("🧠 BrainWash")
     st.write(f"Logged in as: **{st.session_state.user_name}**")
