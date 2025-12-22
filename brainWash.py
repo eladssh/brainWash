@@ -7,6 +7,7 @@ import pypdf
 import html
 import pandas as pd
 import time
+from datetime import datetime
 from dotenv import load_dotenv
 
 # --- 1. Init & Config ---
@@ -19,21 +20,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS Styles (מעודכן לאחידות מלאה) ---
+# --- 2. CSS Styles (עיצוב אחיד ופרופורציונלי) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
-    /* קוביות עיצוב לבנות אחידות */
+    /* קוביות לבנות אחידות לכל חלקי הפרופיל */
     .white-card {
         background: white; padding: 25px; border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         border: 1px solid #eef2f6; 
         text-align: center;
-        height: 100%;
-        min-height: 350px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        height: 400px; /* גובה קשיח מבטיח קו ישר בפרופיל */
+        overflow: hidden;
     }
     
+    .scrollable-content {
+        overflow-y: auto;
+        flex-grow: 1;
+        text-align: left;
+        margin-top: 15px;
+    }
+
     .task-card {
         background: white; padding: 20px; border-radius: 12px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 10px solid #ddd;
@@ -43,27 +54,31 @@ st.markdown("""
     .diff-Medium { border-left-color: #ffa726; } 
     .diff-Easy { border-left-color: #66bb6a; } 
 
-    .badge-card { text-align: center; padding: 10px; }
-    .badge-icon { font-size: 45px; margin-bottom: 5px; }
+    .badge-card { 
+        background: white; padding: 15px; border-radius: 15px;
+        border: 1px solid #eef2f6; text-align: center; height: 180px;
+    }
+    .badge-icon { font-size: 40px; }
     .locked { filter: grayscale(100%); opacity: 0.3; }
 
     .brain-avatar { 
-        font-size: 80px; display: block; margin-bottom: 15px;
+        font-size: 70px; display: block; margin-bottom: 10px;
         animation: float 3s ease-in-out infinite;
     }
     @keyframes float {
         0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-15px); }
+        50% { transform: translateY(-10px); }
     }
 
     .friend-row {
         display: flex; align-items: center; justify-content: space-between;
         padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        font-size: 0.95em;
     }
-    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
-    
+
     .intro-banner {
         background: linear-gradient(90deg, #7F00FF 0%, #E100FF 100%);
         color: white; padding: 25px; border-radius: 20px; margin-bottom: 30px;
@@ -71,7 +86,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. AI Core (ללא שינוי בכלל כפי שביקשת) ---
+# --- 3. AI Core (לא השתנה) ---
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -130,7 +145,6 @@ BRAIN_LEVELS = [
     (2500, "🌌 GALAXY BRAIN", "Universal Wisdom.")
 ]
 
-# הגדרת תגים (Badges)
 ACHIEVEMENTS = [
     {"id": "first", "name": "The Initiate", "emoji": "🥉", "req": 100, "desc": "100 XP Earned"},
     {"id": "pro", "name": "Scholar", "emoji": "🥈", "req": 10, "type": "tasks", "desc": "10 Quests Done"},
@@ -151,50 +165,29 @@ def get_brain_status(xp):
 
 def render_profile():
     st.title("👤 Brain Profile")
-    
     with st.expander("📝 Edit Identity"):
         st.session_state.user_name = st.text_input("Username", st.session_state.user_name)
 
-    (lvl_xp, lvl_title, lvl_desc), next_limit = get_brain_status(st.session_state.xp)
-    
+    (lvl_xp, lvl_title, lvl_desc), next_lim = get_brain_status(st.session_state.xp)
     col1, col2, col3 = st.columns(3)
     
     with col1:
         emoji = lvl_title.split()[0]
-        st.markdown(f"""
-            <div class="white-card">
-                <div class="brain-avatar">{emoji}</div>
-                <h2>{st.session_state.user_name}</h2>
-                <h4 style="color: #7F00FF;">{lvl_title}</h4>
-                <p>{lvl_desc}</p>
-                <div style="background:#eee; padding:5px; border-radius:10px;">Level {int(st.session_state.xp / 500) + 1}</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="white-card"><div class="brain-avatar">🧠</div><h2>{st.session_state.user_name}</h2><h4 style="color:#7F00FF;">{lvl_title}</h4><p>{lvl_desc}</p><div style="background:#eee; padding:5px; border-radius:10px;">Level {int(st.session_state.xp / 500) + 1}</div></div>', unsafe_allow_html=True)
 
     with col2:
-        st.markdown(f"""
-            <div class="white-card">
-                <h3 style="margin-top:0;">📊 Statistics</h3>
-                <div style="text-align:left; margin-top:20px;">
-                    <p><strong>Total XP:</strong> {st.session_state.xp}</p>
-                    <p><strong>Quests Done:</strong> {st.session_state.tasks_completed}</p>
-                    <p><strong>Day Streak:</strong> 🔥 3 Days</p>
-                    <p><strong>Global Rank:</strong> #1,240</p>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="white-card"><h3>📊 Statistics</h3><div class="scrollable-content"><p><strong>Total XP:</strong> {st.session_state.xp}</p><p><strong>Quests Done:</strong> {st.session_state.tasks_completed}</p><p><strong>Day Streak:</strong> 🔥 3 Days</p><p><strong>Global Rank:</strong> #1,240</p></div></div>', unsafe_allow_html=True)
 
     with col3:
-        st.markdown('<div class="white-card"><h3 style="margin-top:0;">👥 Buddies</h3>', unsafe_allow_html=True)
-        friends = [("Sarah_Brains", "online"), ("Mike_The_Wiz", "online"), ("Lazy_Dave", "offline")]
-        for name, status in friends:
+        st.markdown('<div class="white-card"><h3>👥 Study Buddies</h3><div class="scrollable-content">', unsafe_allow_html=True)
+        friends = [("Sarah_Brains", "online", "Physics"), ("Mike_The_Wiz", "online", "Algebra"), ("Lazy_Dave", "offline", "Last seen 2d ago")]
+        for name, status, activity in friends:
             dot = "online" if status == "online" else "offline"
-            st.markdown(f'<div class="friend-row"><span>{name}</span><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
-        st.write("")
-        st.button("➕ Add Buddy", use_container_width=True)
+            st.markdown(f'<div class="friend-row"><div><strong>{name}</strong><br><small>{activity}</small></div><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.button("➕ Add Friend", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # מערכת תגים (Achievements)
     st.subheader("🏆 Achievements")
     badge_cols = st.columns(len(ACHIEVEMENTS))
     for i, ach in enumerate(ACHIEVEMENTS):
@@ -203,66 +196,41 @@ def render_profile():
             if st.session_state.tasks_completed >= ach["req"]: is_locked = False
         else:
             if st.session_state.xp >= ach["req"]: is_locked = False
-        
         with badge_cols[i]:
             status = "locked" if is_locked else ""
-            st.markdown(f"""
-                <div class="white-card badge-card {status}" style="min-height:180px;">
-                    <div class="badge-icon">{ach['emoji']}</div>
-                    <strong>{ach['name']}</strong><br><small>{ach['desc']}</small>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="white-card badge-card {status}"><div class="badge-icon">{ach["emoji"]}</div><strong>{ach["name"]}</strong><br><small>{ach["desc"]}</small></div>', unsafe_allow_html=True)
 
-    # שעון עצר (Focus Mode)
     st.divider()
     st.subheader("⏲️ Focus Mode")
-    with st.expander("Launch Deep Work Timer"):
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            focus_mins = st.slider("Set Session Duration (Minutes)", 5, 120, 25)
-        
-        if st.button("🚀 Start Focus Session", use_container_width=True, type="primary"):
-            placeholder = st.empty()
-            stop_placeholder = st.empty()
-            
-            # לוגיקת טיימר
-            for seconds in range(focus_mins * 60, 0, -1):
-                mins, secs = divmod(seconds, 60)
-                placeholder.metric("Concentration Remaining", f"{mins:02d}:{secs:02d}")
-                if stop_placeholder.button("🛑 Stop & Cancel", key=f"stop_{seconds}"):
+    with st.expander("Start Deep Work Session"):
+        focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
+        c1, c2 = st.columns(2)
+        if c1.button("🚀 Start Timer", use_container_width=True, type="primary"):
+            p = st.empty()
+            for s in range(focus_mins * 60, 0, -1):
+                # כפתור העצירה מאופשר על ידי הרצת הקוד מחדש (Rerun)
+                if c2.button("🛑 Stop & Reset", key=f"stop_{s}", use_container_width=True):
                     st.rerun()
+                m, sc = divmod(s, 60)
+                p.metric("Time Remaining", f"{m:02d}:{sc:02d}")
                 time.sleep(1)
-            
             st.balloons()
-            st.success("Session Complete! +50 XP")
             st.session_state.xp += 50
             st.rerun()
 
 def render_arcade():
-    # פסקת פתיחה
-    st.markdown("""
-        <div class="intro-banner">
-            <h2 style="margin:0;">Welcome to BrainWash Arcade 🎮</h2>
-            <p style="margin-bottom:0; font-size:1.1em;">
-                Turn your study materials into an RPG adventure. Upload a PDF or search a topic to generate active learning quests. 
-                Earn XP, unlock powerful ranks, and master your subjects through gamified challenges!
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div class="intro-banner"><h2>Welcome to BrainWash Arcade 🎮</h2><p>Turn study materials into active quests. Earn XP, unlock ranks, and master subjects!</p></div>', unsafe_allow_html=True)
     
-    # Progress Bar Header
     (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
-    prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
-    st.write(f"**Current Rank:** {lvl_title} ({st.session_state.xp} XP)")
-    st.progress(prog)
+    st.write(f"**Rank:** {lvl_title} ({st.session_state.xp} XP)")
+    st.progress(min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0))
 
     if not st.session_state.user_details:
-        t1, t2 = st.tabs(["🔍 Search Mission", "📄 PDF Intelligence"])
+        t1, t2 = st.tabs(["🔍 Search", "📄 PDF"])
         with t1:
             with st.form("manual"):
-                sub = st.text_input("Subject", "Computer Science")
-                top = st.text_input("Topic", "Data Structures")
-                if st.form_submit_button("Start Mission", use_container_width=True):
+                sub, top = st.text_input("Subject", "Math"), st.text_input("Topic", "Matrices")
+                if st.form_submit_button("Start Mission"):
                     plan = get_initial_plan(sub, top)
                     if plan:
                         st.session_state.current_tasks = plan['tasks']
@@ -270,9 +238,8 @@ def render_arcade():
                         st.rerun()
         with t2:
             with st.form("pdf"):
-                sub_p = st.text_input("Subject")
-                f = st.file_uploader("Upload PDF", type="pdf")
-                if st.form_submit_button("Analyze & Play", use_container_width=True):
+                sub_p, f = st.text_input("Subject"), st.file_uploader("Upload PDF", type="pdf")
+                if st.form_submit_button("Analyze"):
                     if f:
                         reader = pypdf.PdfReader(f)
                         txt = "".join([p.extract_text() for p in reader.pages])
@@ -282,55 +249,42 @@ def render_arcade():
                             st.session_state.user_details = {"sub": sub_p, "top": f.name, "pdf_text": txt}
                             st.rerun()
     else:
-        st.subheader(f"📍 Objective: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
-            d = task['difficulty']
-            xp = task['xp']
-            st.markdown(f"""
-                <div class="task-card diff-{d}">
-                    <span class="badge bg-{d}">{d} | +{xp} XP</span>
-                    <div style="margin-top:10px; font-size:1.1em;">{html.escape(task['text'])}</div>
-                </div>
-            """, unsafe_allow_html=True)
+            # תיקון ה-KeyError: שימוש ב-.get() כדי למנוע קריסה
+            d = task.get('difficulty', 'Medium')
+            xp_reward = task.get('xp', task.get('XP', 50)) 
             
+            st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{xp_reward} XP</span><br>{html.escape(task.get("text", "Task description missing"))}</div>', unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("✅ Success", key=f"d{i}", use_container_width=True, type="primary"):
-                    st.session_state.xp += xp
+                if st.button("✅ Done", key=f"d{i}", use_container_width=True, type="primary"):
+                    st.session_state.xp += xp_reward
                     st.session_state.tasks_completed += 1
-                    with st.spinner("Generating next challenge..."):
-                        new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
-                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                    new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
+                    st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                     st.rerun()
             with c2:
                 if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
                     if st.session_state.xp >= 20:
                         st.session_state.xp -= 20
-                        with st.spinner("Rerolling..."):
-                            new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
-                            st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                        new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
+                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                         st.rerun()
-            
-            with st.expander("💡 View Solution"):
-                st.write(task.get('solution', 'Check your materials!'))
-        
-        if st.button("🏳️ Reset Session", use_container_width=True):
+            with st.expander("💡 Solution"):
+                st.write(task.get('solution', 'No solution found.'))
+        if st.button("🏳️ Reset Session"):
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 6. Router ---
+# --- 6. Sidebar ---
 with st.sidebar:
     st.title("🧠 BrainWash")
     st.write(f"Hello, **{st.session_state.user_name}**!")
-    
-    # סטטוס בסיידבר
-    (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
-    sidebar_prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
-    st.write(f"Rank Progress: **{lvl_title}**")
-    st.progress(sidebar_prog)
-    
+    (lx, lt, _), nxt = get_brain_status(st.session_state.xp)
+    st.write(f"Rank: **{lt}**")
+    st.progress(min((st.session_state.xp - lx) / (nxt - lx), 1.0))
     st.divider()
-    page = st.radio("Navigation Menu", ["🎮 Arcade Mode", "👤 Brain Profile"])
+    page = st.radio("Menu", ["Arcade", "Profile"])
 
-if page == "🎮 Arcade Mode": render_arcade()
+if page == "Arcade": render_arcade()
 else: render_profile()
