@@ -20,19 +20,20 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS Styles (מעודכן לאחידות מלאה) ---
+# --- 2. CSS Styles (תיקון פרופורציות וגלישה) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
-    /* קוביות עיצוב לבנות - אחידות לכל הפרופיל */
     .white-card {
         background: white; padding: 25px; border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         border: 1px solid #eef2f6; 
         margin-bottom: 20px;
         text-align: center;
-        min-height: 320px; /* מבטיח גובה אחיד לקוביות העליונות */
+        height: auto;
+        min-height: 320px;
+        overflow: hidden; /* מונע מהמלל לצאת מהקוביה */
     }
     
     .task-card {
@@ -59,9 +60,10 @@ st.markdown("""
 
     .friend-row {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        padding: 8px 0; border-bottom: 1px solid #f8f9fa;
+        font-size: 0.9em;
     }
-    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+    .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
     
@@ -72,7 +74,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. AI Core (ללא שינוי כפי שביקשת) ---
+# --- 3. AI Core ---
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -89,7 +91,8 @@ def get_ai_response(prompt, is_json=False):
     )
     try:
         response = client.models.generate_content(model=model_id, contents=prompt, config=config)
-        return response.text
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        return clean_text
     except Exception as e:
         st.error(f"AI Error: {e}")
         return None
@@ -97,12 +100,18 @@ def get_ai_response(prompt, is_json=False):
 def get_initial_plan(subject, topic, context=""):
     prompt = f"Create a study plan for {subject}: {topic}. Context: {context[:5000]} Return 5 tasks (1 Hard, 2 Medium, 2 Easy) with solutions in JSON format."
     res = get_ai_response(prompt, is_json=True)
-    return json.loads(res) if res else None
+    try:
+        return json.loads(res) if res else None
+    except:
+        return None
 
 def get_new_task_json(subject, topic, diff):
     prompt = f"Create one new {diff} study task for {subject}: {topic}. Include a brief solution. Return JSON: {{'text': '...', 'solution': '...'}}"
     res = get_ai_response(prompt, is_json=True)
-    return json.loads(res) if res else {"text": "Review materials", "solution": "Check notes."}
+    try:
+        return json.loads(res) if res else {"text": "Review materials", "solution": "Check notes."}
+    except:
+        return {"text": "Review materials", "solution": "Check notes."}
 
 # --- 4. Logic & State ---
 if "xp" not in st.session_state: st.session_state.xp = 0
@@ -138,7 +147,6 @@ def render_profile():
 
     (lvl_xp, lvl_title), next_lim = get_brain_status(st.session_state.xp)
     
-    # שלוש הקוביות העליונות בעיצוב זהה ואחיד
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -155,7 +163,7 @@ def render_profile():
         st.markdown(f"""
             <div class="white-card">
                 <h3 style="margin-top:0;">📊 Statistics</h3>
-                <div style="text-align:left; margin-top:30px; font-size:1.1em;">
+                <div style="text-align:left; margin-top:20px;">
                     <p><strong>Total XP:</strong> {st.session_state.xp}</p>
                     <p><strong>Quests Done:</strong> {st.session_state.tasks_completed}</p>
                     <p><strong>Day Streak:</strong> 🔥 3 Days</p>
@@ -169,12 +177,12 @@ def render_profile():
         friends = [("Sarah_Brains", "online"), ("Mike_The_Wiz", "online"), ("Lazy_Dave", "offline")]
         for name, status in friends:
             dot = "online" if status == "online" else "offline"
-            st.markdown(f'<div class="friend-row"><span>{name}</span><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="friend-row"><span style="overflow:hidden; text-overflow:ellipsis;">{name}</span><span class="status-dot {dot}"></span></div>', unsafe_allow_html=True)
         st.write("")
         st.button("➕ Add Buddy", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # מערכת תגים (Achievements)
+    # Achievements
     st.subheader("🏆 Achievements")
     badge_cols = st.columns(len(ACHIEVEMENTS))
     for i, ach in enumerate(ACHIEVEMENTS):
@@ -192,23 +200,21 @@ def render_profile():
                 </div>
             """, unsafe_allow_html=True)
 
-    # Focus Mode (Timer) עם כפתור עצירה
+    # Focus Mode
     st.divider()
     st.subheader("⏲️ Focus Mode")
     with st.expander("Start Deep Work Session"):
         focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
         
         c_start, c_stop = st.columns(2)
-        start_trigger = c_start.button("🚀 Start Timer", use_container_width=True, type="primary")
-        stop_trigger = c_stop.button("🛑 Stop & Reset", use_container_width=True)
-
-        if start_trigger:
+        if c_start.button("🚀 Start Timer", use_container_width=True, type="primary"):
             placeholder = st.empty()
+            # כפתור עצירה שמופיע רק כשהטיימר רץ
+            stop_btn = c_stop.button("🛑 Stop Timer", use_container_width=True)
+            
             for seconds in range(focus_mins * 60, 0, -1):
-                # בדיקה אם המשתמש לחץ על עצירה (ב-Streamlit זה יגרום ל-Rerun)
-                if stop_trigger:
+                if stop_btn: # במידה ולחצו על עצירה
                     st.rerun()
-                
                 mins, secs = divmod(seconds, 60)
                 placeholder.metric("Concentration Remaining", f"{mins:02d}:{secs:02d}")
                 time.sleep(1)
@@ -222,8 +228,7 @@ def render_arcade():
     st.markdown("""
         <div class="intro-text">
             <h2 style="margin:0;">Welcome to BrainWash Arcade 🎮</h2>
-            <p style="margin-bottom:0;">Turn your study materials into an RPG adventure. Upload a PDF or search a topic to generate active learning quests. 
-            Earn XP, unlock ranks, and master your subjects!</p>
+            <p style="margin-bottom:0;">Turn your study materials into an RPG adventure.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -235,10 +240,13 @@ def render_arcade():
                 top = st.text_input("Topic", "Matrices")
                 if st.form_submit_button("Launch Mission", use_container_width=True):
                     plan = get_initial_plan(sub, top)
-                    if plan:
+                    # תיקון ה-TypeError: בדיקה ש-plan הוא מילון
+                    if plan and isinstance(plan, dict) and 'tasks' in plan:
                         st.session_state.current_tasks = plan['tasks']
                         st.session_state.user_details = {"sub": sub, "top": top}
                         st.rerun()
+                    else:
+                        st.error("Could not generate a valid study plan. Please try again.")
         with t2:
             with st.form("pdf"):
                 f = st.file_uploader("Upload PDF", type="pdf")
@@ -247,10 +255,12 @@ def render_arcade():
                         reader = pypdf.PdfReader(f)
                         txt = "".join([p.extract_text() for p in reader.pages])
                         plan = get_initial_plan("PDF Study", f.name, txt)
-                        if plan:
+                        if plan and isinstance(plan, dict) and 'tasks' in plan:
                             st.session_state.current_tasks = plan['tasks']
                             st.session_state.user_details = {"sub": "PDF", "top": f.name}
                             st.rerun()
+                        else:
+                            st.error("Could not analyze the PDF. Please try again.")
     else:
         st.subheader(f"📍 Objective: {st.session_state.user_details['top']}")
         for i, task in enumerate(st.session_state.current_tasks):
@@ -278,7 +288,7 @@ def render_arcade():
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 6. Sidebar & Router ---
+# --- 6. Sidebar ---
 with st.sidebar:
     st.title("🧠 BrainWash")
     st.write(f"Logged in as: **{st.session_state.user_name}**")
