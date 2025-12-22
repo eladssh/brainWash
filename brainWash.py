@@ -219,62 +219,41 @@ def render_profile():
             st.rerun()
 
 def render_arcade():
-    st.markdown('<div class="intro-banner"><h2>Welcome to BrainWash Arcade 🎮</h2><p>Turn study materials into active quests. Earn XP, unlock ranks, and master subjects!</p></div>', unsafe_allow_html=True)
-    
-    (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
-    st.write(f"**Rank:** {lvl_title} ({st.session_state.xp} XP)")
-    st.progress(min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0))
-
-    if not st.session_state.user_details:
-        t1, t2 = st.tabs(["🔍 Search", "📄 PDF"])
-        with t1:
-            with st.form("manual"):
-                sub, top = st.text_input("Subject", "Math"), st.text_input("Topic", "Matrices")
-                if st.form_submit_button("Start Mission"):
-                    plan = get_initial_plan(sub, top)
-                    if plan:
-                        st.session_state.current_tasks = plan['tasks']
-                        st.session_state.user_details = {"sub": sub, "top": top}
-                        st.rerun()
-        with t2:
-            with st.form("pdf"):
-                sub_p, f = st.text_input("Subject"), st.file_uploader("Upload PDF", type="pdf")
-                if st.form_submit_button("Analyze"):
-                    if f:
-                        reader = pypdf.PdfReader(f)
-                        txt = "".join([p.extract_text() for p in reader.pages])
-                        plan = get_initial_plan(sub_p, f.name, txt)
-                        if plan:
-                            st.session_state.current_tasks = plan['tasks']
-                            st.session_state.user_details = {"sub": sub_p, "top": f.name, "pdf_text": txt}
-                            st.rerun()
-    else:
-        for i, task in enumerate(st.session_state.current_tasks):
-            # תיקון ה-KeyError: שימוש ב-.get() כדי למנוע קריסה
+    for i, task in enumerate(st.session_state.current_tasks):
+            # בדיקה גמישה של מפתחות כדי למנוע "Task description missing"
+            t_text = task.get('text') or task.get('task') or task.get('Description') or "No description provided."
             d = task.get('difficulty', 'Medium')
-            xp_reward = task.get('xp', task.get('XP', 50)) 
+            # תמיכה ב-xp או XP (אותיות גדולות/קטנות)
+            xp_reward = task.get('xp') or task.get('XP') or 50
             
-            st.markdown(f'<div class="task-card diff-{d}"><span class="badge bg-{d}">{d} | +{xp_reward} XP</span><br>{html.escape(task.get("text", "Task description missing"))}</div>', unsafe_allow_html=True)
+            st.markdown(f"""
+                <div class="task-card diff-{d}">
+                    <span class="badge bg-{d}">{d} | +{xp_reward} XP</span>
+                    <div style="margin-top:10px;">{html.escape(t_text)}</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("✅ Done", key=f"d{i}", use_container_width=True, type="primary"):
+                if st.button("✅ Success", key=f"d{i}", use_container_width=True, type="primary"):
                     st.session_state.xp += xp_reward
                     st.session_state.tasks_completed += 1
                     new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
                     st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                     st.rerun()
             with c2:
-                if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
+                if st.button("🎲 Reroll", key=f"r{i}", use_container_width=True):
                     if st.session_state.xp >= 20:
                         st.session_state.xp -= 20
                         new = get_new_task_json(st.session_state.user_details['sub'], st.session_state.user_details['top'], d)
                         st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp_reward}
                         st.rerun()
-            with st.expander("💡 Solution"):
-                st.write(task.get('solution', 'No solution found.'))
-        if st.button("🏳️ Reset Session"):
-            st.session_state.user_details = {}
-            st.rerun()
+            
+            with st.expander("💡 View Solution"):
+                # בדיקה גמישה גם לפתרון
+                sol = task.get('solution') or task.get('Solution') or "Check your materials!"
+                st.write(sol)
+
 
 # --- 6. Sidebar ---
 with st.sidebar:
@@ -288,3 +267,4 @@ with st.sidebar:
 
 if page == "Arcade": render_arcade()
 else: render_profile()
+
