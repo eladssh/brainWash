@@ -19,39 +19,50 @@ st.set_page_config(
     page_icon="🧠",
     layout="wide"
 )
-
-# --- 2. CSS Styles ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
     /* קוביות לבנות אחידות לכל חלקי הפרופיל */
     .white-card {
-        background: white; padding: 25px; border-radius: 20px;
+        background: white; 
+        padding: 25px; 
+        border-radius: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         border: 1px solid #eef2f6; 
         text-align: center;
+        height: 400px;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
-        justify-content: flex-start;
-        height: 400px; /* גובה קשיח מבטיח קו ישר בפרופיל */
-        overflow: hidden;
+    }
+    
+    .white-card h3 {
+        margin: 0 0 15px 0;
+        flex-shrink: 0;
     }
     
     .scrollable-content {
         overflow-y: auto;
+        overflow-x: hidden;
         flex-grow: 1;
         text-align: left;
-        margin-top: 15px;
+        padding-right: 5px;
     }
 
     .stat-box {
-        background: #f8f9fa; border-radius: 12px; padding: 15px;
-        margin-bottom: 10px; border: 1px solid #eee;
+        background: #f8f9fa; 
+        border-radius: 12px; 
+        padding: 15px;
+        margin-bottom: 10px; 
+        border: 1px solid #eee;
+        word-wrap: break-word;
     }
 
     .brain-avatar { 
-        font-size: 70px; display: block; margin-bottom: 10px;
+        font-size: 70px; 
+        display: block; 
+        margin-bottom: 10px;
         animation: float 3s ease-in-out infinite;
     }
     @keyframes float {
@@ -60,17 +71,38 @@ st.markdown("""
     }
 
     .friend-row {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 0; border-bottom: 1px solid #f8f9fa;
-        font-size: 0.95em;
+        display: flex; 
+        align-items: center; 
+        justify-content: space-between;
+        padding: 10px 0; 
+        border-bottom: 1px solid #f8f9fa;
+        font-size: 0.9em;
+        word-wrap: break-word;
     }
-    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    
+    .friend-row > div {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .status-dot { 
+        height: 10px; 
+        width: 10px; 
+        border-radius: 50%; 
+        display: inline-block; 
+        flex-shrink: 0;
+        margin-left: 10px;
+    }
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
 
     .task-card {
-        background: white; padding: 20px; border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 10px solid #ddd;
+        background: white; 
+        padding: 20px; 
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
+        border-left: 10px solid #ddd;
         margin-bottom: 15px;
     }
     .diff-Hard { border-left-color: #ff4b4b; } 
@@ -78,15 +110,28 @@ st.markdown("""
     .diff-Easy { border-left-color: #66bb6a; }
     
     .badge-card { 
-        background: white; padding: 15px; border-radius: 15px;
-        border: 1px solid #eef2f6; text-align: center; height: 180px;
+        background: white; 
+        padding: 15px; 
+        border-radius: 15px;
+        border: 1px solid #eef2f6; 
+        text-align: center; 
+        height: 180px;
     }
     .badge-icon { font-size: 40px; }
     .locked { filter: grayscale(100%); opacity: 0.3; }
 
     .intro-banner {
         background: linear-gradient(90deg, #7F00FF 0%, #E100FF 100%);
-        color: white; padding: 25px; border-radius: 20px; margin-bottom: 30px;
+        color: white; 
+        padding: 25px; 
+        border-radius: 20px; 
+        margin-bottom: 30px;
+    }
+    
+    /* תיקון לכפתורים בתוך white-card */
+    .white-card .stButton {
+        margin-top: auto;
+        flex-shrink: 0;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -374,3 +419,4 @@ if page == "Arcade":
     render_arcade()
 else: 
     render_profile()
+
