@@ -251,48 +251,48 @@ def render_profile():
         """, unsafe_allow_html=True)
 
     with col3:
-    st.markdown("""
-        <div class="white-card">
-            <h3 style="margin-bottom: 10px;">👥 Study Buddies</h3>
-            <div class="scrollable-content">
-                <div class="friend-row">
-                    <div>
-                        <strong>Sarah_Brains</strong><br><small>Physics</small>
+        st.markdown("""
+            <div class="white-card">
+                <h3 style="margin-bottom: 10px;">👥 Study Buddies</h3>
+                <div class="scrollable-content">
+                    <div class="friend-row">
+                        <div>
+                            <strong>Sarah_Brains</strong><br><small>Physics</small>
+                        </div>
+                        <span class="status-dot online"></span>
                     </div>
-                    <span class="status-dot online"></span>
+                    <div class="friend-row">
+                        <div>
+                            <strong>Mike_The_Wiz</strong><br><small>Algebra</small>
+                        </div>
+                        <span class="status-dot online"></span>
+                    </div>
+                    <div class="friend-row">
+                        <div>
+                            <strong>Lazy_Dave</strong><br><small>Last seen 2d ago</small>
+                        </div>
+                        <span class="status-dot offline"></span>
+                    </div>
                 </div>
-                <div class="friend-row">
-                    <div>
-                        <strong>Mike_The_Wiz</strong><br><small>Algebra</small>
-                    </div>
-                    <span class="status-dot online"></span>
-                </div>
-                <div class="friend-row">
-                    <div>
-                        <strong>Lazy_Dave</strong><br><small>Last seen 2d ago</small>
-                    </div>
-                    <span class="status-dot offline"></span>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
+                    <button style="
+                        width: 100%;
+                        padding: 10px;
+                        background: white;
+                        border: 2px solid #7F00FF;
+                        color: #7F00FF;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.3s;
+                    " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
+                       onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
+                        ➕ Add Friend
+                    </button>
                 </div>
             </div>
-            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
-                <button style="
-                    width: 100%;
-                    padding: 10px;
-                    background: white;
-                    border: 2px solid #7F00FF;
-                    color: #7F00FF;
-                    border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.3s;
-                " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
-                   onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
-                    ➕ Add Friend
-                </button>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     st.divider()
     
@@ -345,7 +345,7 @@ def render_profile():
         'XP': [400, 700, 500, st.session_state.xp]
     })
     st.line_chart(chart_data, x='Week', y='XP', color="#7F00FF")
-
+    
 def render_arcade():
     # Intro Banner
     st.markdown("""
@@ -442,6 +442,7 @@ if page == "Arcade":
     render_arcade()
 else: 
     render_profile()
+
 
 
 
