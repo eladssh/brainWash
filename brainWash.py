@@ -6,8 +6,11 @@ import os
 import pypdf
 import html
 import pandas as pd
+import time
+from datetime import datetime
 from dotenv import load_dotenv
 
+# --- 1. Init & Config ---
 load_dotenv()
 API_KEY = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
@@ -17,35 +20,51 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- 2. CSS Styles ---
 st.markdown("""
     <style>
-    .stApp { background-color: #f0f2f6; }
+    .stApp { background-color: #f4f7f9; }
     
-    .profile-card {
-        background: white; padding: 30px; border-radius: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center;
-        border: 1px solid #e0e6ed; height: 100%;
+    /* קוביות לבנות אחידות לכל חלקי הפרופיל */
+    .white-card {
+        background: white; padding: 25px; border-radius: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        border: 1px solid #eef2f6; 
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        height: 400px; /* גובה קשיח מבטיח קו ישר בפרופיל */
+        overflow: hidden;
     }
     
+    .scrollable-content {
+        overflow-y: auto;
+        flex-grow: 1;
+        text-align: left;
+        margin-top: 15px;
+    }
+
     .stat-box {
         background: #f8f9fa; border-radius: 12px; padding: 15px;
         margin-bottom: 10px; border: 1px solid #eee;
     }
 
     .brain-avatar { 
-        font-size: 80px; display: block; margin-bottom: 15px;
+        font-size: 70px; display: block; margin-bottom: 10px;
         animation: float 3s ease-in-out infinite;
     }
     @keyframes float {
         0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-15px); }
+        50% { transform: translateY(-10px); }
     }
 
     .friend-row {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 12px; border-bottom: 1px solid #f1f1f1;
+        padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        font-size: 0.95em;
     }
-    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
     .online { background-color: #66bb6a; }
     .offline { background-color: #bdbdbd; }
 
@@ -56,10 +75,23 @@ st.markdown("""
     }
     .diff-Hard { border-left-color: #ff4b4b; } 
     .diff-Medium { border-left-color: #ffa726; } 
-    .diff-Easy { border-left-color: #66bb6a; } 
+    .diff-Easy { border-left-color: #66bb6a; }
+    
+    .badge-card { 
+        background: white; padding: 15px; border-radius: 15px;
+        border: 1px solid #eef2f6; text-align: center; height: 180px;
+    }
+    .badge-icon { font-size: 40px; }
+    .locked { filter: grayscale(100%); opacity: 0.3; }
+
+    .intro-banner {
+        background: linear-gradient(90deg, #7F00FF 0%, #E100FF 100%);
+        color: white; padding: 25px; border-radius: 20px; margin-bottom: 30px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
+# --- 3. AI Core (הפונקציות המקוריות שלך - ללא שינוי) ---
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -69,7 +101,7 @@ def get_ai_client():
 def get_ai_response(prompt, is_json=False):
     client = get_ai_client()
     if not client: return None
-    model_id = "gemini-2.5-flash"
+    model_id = "gemini-2.5-flash"  # המודל המקורי שלך
     config = types.GenerateContentConfig(
         temperature=0.7,
         response_mime_type="application/json" if is_json else "text/plain"
@@ -118,6 +150,13 @@ BRAIN_LEVELS = [
     (2500, "🌌 GALAXY BRAIN", "Universal Wisdom.")
 ]
 
+ACHIEVEMENTS = [
+    {"id": "first", "name": "The Initiate", "emoji": "🥉", "req": 100, "desc": "100 XP Earned"},
+    {"id": "pro", "name": "Scholar", "emoji": "🥈", "req": 10, "type": "tasks", "desc": "10 Quests Done"},
+    {"id": "master", "name": "Sage", "emoji": "🥇", "req": 1500, "desc": "1,500 XP Earned"},
+    {"id": "god", "name": "Galaxy Brain", "emoji": "🌌", "req": 5000, "desc": "5,000 XP Earned"}
+]
+
 def get_brain_status(xp):
     current = BRAIN_LEVELS[0]
     next_limit = BRAIN_LEVELS[1][0]
@@ -127,6 +166,7 @@ def get_brain_status(xp):
             next_limit = BRAIN_LEVELS[i+1][0] if i+1 < len(BRAIN_LEVELS) else xp * 1.5
     return current, next_limit
 
+# --- 5. UI Renderers ---
 def render_profile():
     st.title("👤 Brain Profile")
     
@@ -143,7 +183,7 @@ def render_profile():
     with col1:
         emoji = lvl_title.split()[0]
         st.markdown(f"""
-            <div class="profile-card">
+            <div class="white-card">
                 <div class="brain-avatar">{emoji}</div>
                 <h2>{st.session_state.user_name}</h2>
                 <h4 style="color: #7F00FF;">{lvl_title}</h4>
@@ -153,19 +193,20 @@ def render_profile():
         """, unsafe_allow_html=True)
 
     with col2:
-        st.markdown('<div class="profile-card">', unsafe_allow_html=True)
-        st.subheader("📊 Statistics")
         st.markdown(f"""
-            <div class="stat-box"><strong>Total XP:</strong> {st.session_state.xp}</div>
-            <div class="stat-box"><strong>Tasks Done:</strong> {st.session_state.tasks_completed}</div>
-            <div class="stat-box"><strong>Day Streak:</strong> 🔥 ONE Day</div>
-            <div class="stat-box"><strong>Global Rank:</strong> #1,240</div>
+            <div class="white-card">
+                <h3>📊 Statistics</h3>
+                <div class="scrollable-content">
+                    <div class="stat-box"><strong>Total XP:</strong> {st.session_state.xp}</div>
+                    <div class="stat-box"><strong>Tasks Done:</strong> {st.session_state.tasks_completed}</div>
+                    <div class="stat-box"><strong>Day Streak:</strong> 🔥 3 Days</div>
+                    <div class="stat-box"><strong>Global Rank:</strong> #1,240</div>
+                </div>
+            </div>
         """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
     with col3:
-        st.markdown('<div class="profile-card">', unsafe_allow_html=True)
-        st.subheader("👥 Study Buddies")
+        st.markdown('<div class="white-card"><h3>👥 Study Buddies</h3><div class="scrollable-content">', unsafe_allow_html=True)
         friends = [
             ("Sarah_Brains", "online", "Physics"),
             ("Mike_The_Wiz", "online", "Algebra"),
@@ -175,22 +216,76 @@ def render_profile():
             dot_class = "online" if status == "online" else "offline"
             st.markdown(f"""
                 <div class="friend-row">
-                    <div style="text-align:left;">
+                    <div>
                         <strong>{name}</strong><br><small>{activity}</small>
                     </div>
                     <span class="status-dot {dot_class}"></span>
                 </div>
             """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         st.button("➕ Add Friend", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.divider()
+    
+    # Achievements Section
+    st.subheader("🏆 Achievements")
+    badge_cols = st.columns(len(ACHIEVEMENTS))
+    for i, ach in enumerate(ACHIEVEMENTS):
+        is_locked = True
+        if ach.get("type") == "tasks":
+            if st.session_state.tasks_completed >= ach["req"]: 
+                is_locked = False
+        else:
+            if st.session_state.xp >= ach["req"]: 
+                is_locked = False
+        
+        with badge_cols[i]:
+            status = "locked" if is_locked else ""
+            st.markdown(f"""
+                <div class="badge-card {status}">
+                    <div class="badge-icon">{ach["emoji"]}</div>
+                    <strong>{ach["name"]}</strong><br>
+                    <small>{ach["desc"]}</small>
+                </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+    
+    # Focus Mode Timer
+    st.subheader("⏲️ Focus Mode")
+    with st.expander("Start Deep Work Session"):
+        focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
+        c1, c2 = st.columns(2)
+        if c1.button("🚀 Start Timer", use_container_width=True, type="primary"):
+            p = st.empty()
+            stop_button_placeholder = c2.empty()
+            for s in range(focus_mins * 60, 0, -1):
+                if stop_button_placeholder.button("🛑 Stop & Reset", key=f"stop_{s}", use_container_width=True):
+                    st.rerun()
+                m, sc = divmod(s, 60)
+                p.metric("Time Remaining", f"{m:02d}:{sc:02d}")
+                time.sleep(1)
+            st.balloons()
+            st.session_state.xp += 50
+            st.rerun()
+    
+    st.divider()
     st.subheader("📈 Learning Progress")
-    chart_data = pd.DataFrame({'Week': ['W1', 'W2', 'W3', 'W4'], 'XP': [400, 700, 500, st.session_state.xp]})
+    chart_data = pd.DataFrame({
+        'Week': ['W1', 'W2', 'W3', 'W4'], 
+        'XP': [400, 700, 500, st.session_state.xp]
+    })
     st.line_chart(chart_data, x='Week', y='XP', color="#7F00FF")
 
 def render_arcade():
-    st.title("🎮 Arcade Mode")
+    # Intro Banner
+    st.markdown("""
+        <div class="intro-banner">
+            <h2>Welcome to BrainWash Arcade 🎮</h2>
+            <p>Turn study materials into active quests. Earn XP, unlock ranks, and master subjects!</p>
+        </div>
+    """, unsafe_allow_html=True)
     
     # Progress Bar Header
     (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
@@ -260,11 +355,22 @@ def render_arcade():
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 6. Router ---
+# --- 6. Sidebar with Progress ---
 with st.sidebar:
     st.title("🧠 BrainWash")
     st.write(f"Hello, **{st.session_state.user_name}**!")
+    
+    # הצגת התקדמות ב-Sidebar
+    (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
+    st.write(f"Rank: **{lvl_title}**")
+    prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
+    st.progress(prog)
+    
+    st.divider()
     page = st.radio("Menu", ["Arcade", "Profile"])
 
-if page == "Arcade": render_arcade()
-else: render_profile()
+# --- 7. Router ---
+if page == "Arcade": 
+    render_arcade()
+else: 
+    render_profile()
