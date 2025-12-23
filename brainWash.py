@@ -251,50 +251,48 @@ def render_profile():
         """, unsafe_allow_html=True)
 
     with col3:
-        # בניית כל התוכן כ-HTML אחד
-        friends = [
-            ("Sarah_Brains", "online", "Physics"),
-            ("Mike_The_Wiz", "online", "Algebra"),
-            ("Lazy_Dave", "offline", "Last seen 2d ago")
-        ]
-        
-        friends_html = ""
-        for name, status, activity in friends:
-            dot_class = "online" if status == "online" else "offline"
-            friends_html += f"""
+    st.markdown("""
+        <div class="white-card">
+            <h3 style="margin-bottom: 10px;">👥 Study Buddies</h3>
+            <div class="scrollable-content">
                 <div class="friend-row">
                     <div>
-                        <strong>{name}</strong><br><small>{activity}</small>
+                        <strong>Sarah_Brains</strong><br><small>Physics</small>
                     </div>
-                    <span class="status-dot {dot_class}"></span>
+                    <span class="status-dot online"></span>
                 </div>
-            """
-        
-        st.markdown(f"""
-            <div class="white-card">
-                <h3 style="margin-bottom: 10px;">👥 Study Buddies</h3>
-                <div class="scrollable-content">
-                    {friends_html}
+                <div class="friend-row">
+                    <div>
+                        <strong>Mike_The_Wiz</strong><br><small>Algebra</small>
+                    </div>
+                    <span class="status-dot online"></span>
                 </div>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
-                    <button style="
-                        width: 100%;
-                        padding: 10px;
-                        background: white;
-                        border: 2px solid #7F00FF;
-                        color: #7F00FF;
-                        border-radius: 8px;
-                        font-size: 14px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.3s;
-                    " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
-                       onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
-                        ➕ Add Friend
-                    </button>
+                <div class="friend-row">
+                    <div>
+                        <strong>Lazy_Dave</strong><br><small>Last seen 2d ago</small>
+                    </div>
+                    <span class="status-dot offline"></span>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
+                <button style="
+                    width: 100%;
+                    padding: 10px;
+                    background: white;
+                    border: 2px solid #7F00FF;
+                    color: #7F00FF;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s;
+                " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
+                   onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
+                    ➕ Add Friend
+                </button>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
     st.divider()
     
@@ -444,5 +442,6 @@ if page == "Arcade":
     render_arcade()
 else: 
     render_profile()
+
 
 
