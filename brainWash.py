@@ -23,7 +23,6 @@ st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
     
-    /* קוביות לבנות אחידות לכל חלקי הפרופיל */
     .white-card {
         background: white; 
         padding: 25px; 
@@ -128,7 +127,6 @@ st.markdown("""
         margin-bottom: 30px;
     }
     
-    /* תיקון לכפתורים בתוך white-card */
     .white-card .stButton {
         margin-top: auto;
         flex-shrink: 0;
@@ -136,7 +134,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. AI Core (הפונקציות המקוריות שלך - ללא שינוי) ---
+# --- 3. AI Core
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -428,7 +426,6 @@ with st.sidebar:
     st.title("🧠 BrainWash")
     st.write(f"Hello, **{st.session_state.user_name}**!")
     
-    # הצגת התקדמות ב-Sidebar
     (lvl_xp, lvl_title, _), next_limit = get_brain_status(st.session_state.xp)
     st.write(f"Rank: **{lvl_title}**")
     prog = min((st.session_state.xp - lvl_xp) / (next_limit - lvl_xp), 1.0)
@@ -442,6 +439,7 @@ if page == "Arcade":
     render_arcade()
 else: 
     render_profile()
+
 
 
 
