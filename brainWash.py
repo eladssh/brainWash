@@ -11,6 +11,7 @@ from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 import sqlite3
 from pathlib import Path
+import io
 
 # --- 1. Database Setup ---
 DB_PATH = Path("brainwash.db")
@@ -81,6 +82,15 @@ def get_or_create_user(username, onboarding_data=None):
     conn.close()
     return user
 
+def user_exists(username):
+    """Check if username exists"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
 def update_user_stats(username, xp_gained=0, task_completed=False):
     """Update user XP, tasks, and streak"""
     conn = sqlite3.connect(DB_PATH)
@@ -112,6 +122,18 @@ def update_user_stats(username, xp_gained=0, task_completed=False):
         
         conn.commit()
     
+    conn.close()
+
+def update_user_profile(username, subjects, learning_style, weekly_commitment, daily_goal):
+    """Update user learning preferences"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE User 
+        SET subjects_interested = ?, learning_style = ?, weekly_commitment = ?, daily_goal = ?
+        WHERE username = ?
+    """, (subjects, learning_style, weekly_commitment, daily_goal, username))
+    conn.commit()
     conn.close()
 
 def log_task_completion(username, task_text, difficulty, xp_earned, subject, topic):
@@ -196,6 +218,15 @@ def get_user_analytics(username):
     """, (user_id,))
     recent_tasks = cursor.fetchall()
     
+    # All tasks for export
+    cursor.execute("""
+        SELECT completed_at, subject, topic, task_text, difficulty, xp_earned
+        FROM TaskCompletion
+        WHERE user_id = ?
+        ORDER BY completed_at DESC
+    """, (user_id,))
+    all_tasks = cursor.fetchall()
+    
     conn.close()
     
     return {
@@ -203,7 +234,8 @@ def get_user_analytics(username):
         'daily_xp': daily_xp,
         'difficulty_breakdown': difficulty_breakdown,
         'subject_stats': subject_stats,
-        'recent_tasks': recent_tasks
+        'recent_tasks': recent_tasks,
+        'all_tasks': all_tasks
     }
 
 def get_today_progress(username):
@@ -359,8 +391,8 @@ st.markdown("""
         padding: 40px;
         border-radius: 20px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        max-width: 600px;
-        margin: 50px auto;
+        max-width: 700px;
+        margin: 30px auto;
     }
     
     .daily-goal-card {
@@ -378,6 +410,32 @@ st.markdown("""
         box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         text-align: center;
         margin-bottom: 15px;
+    }
+    
+    .login-container {
+        background: white;
+        padding: 50px;
+        border-radius: 25px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        max-width: 500px;
+        margin: 80px auto;
+        text-align: center;
+    }
+    
+    .feature-box {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 12px;
+        margin: 15px 0;
+        border-left: 4px solid #7F00FF;
+    }
+    
+    .showcase-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 25px;
+        border-radius: 15px;
+        margin: 20px 0;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -429,6 +487,7 @@ def get_new_task_json(subject, topic, diff, user_context=""):
     return json.loads(res) if res else {"text": "Review materials", "solution": "No solution available."}
 
 # --- 4. Logic & State ---
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
 if "onboarded" not in st.session_state: st.session_state.onboarded = False
 if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
 if "user_details" not in st.session_state: st.session_state.user_details = {}
@@ -477,59 +536,208 @@ def load_user_data():
                 'weekly_commitment': user[10]
             }
 
-# --- 5. Onboarding ---
+# --- 5. Login Page ---
+def render_login():
+    st.markdown("""
+        <div class="login-container">
+            <div class="brain-avatar">🧠</div>
+            <h1 style="color: #7F00FF; margin-bottom: 10px;">BrainWash: Arcade</h1>
+            <p style="color: #666; margin-bottom: 40px;">Gamify Your Learning Journey</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["🔑 Been Here?", "✨ New Here?"])
+    
+    with tab1:
+        st.markdown("### Welcome Back!")
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter your username")
+            login_btn = st.form_submit_button("🚀 Enter Arcade", use_container_width=True, type="primary")
+            
+            if login_btn:
+                if not username:
+                    st.error("Please enter your username!")
+                elif user_exists(username):
+                    st.session_state.user_name = username
+                    st.session_state.authenticated = True
+                    st.session_state.onboarded = True
+                    load_user_data()
+                    st.success(f"Welcome back, {username}! 🎮")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("Username not found! Please create a new account in the 'New Here?' tab.")
+    
+    with tab2:
+        st.markdown("### Create Your Account")
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose a Username", placeholder="brain_master_2024")
+            signup_btn = st.form_submit_button("🎯 Create Account", use_container_width=True, type="primary")
+            
+            if signup_btn:
+                if not new_username:
+                    st.error("Please choose a username!")
+                elif user_exists(new_username):
+                    st.error("Username already exists! Please choose a different one or login.")
+                else:
+                    st.session_state.user_name = new_username
+                    st.session_state.authenticated = True
+                    st.session_state.onboarded = False
+                    st.success(f"Account created! Let's set up your profile, {new_username}! 🎉")
+                    time.sleep(0.5)
+                    st.rerun()
+
+# --- 6. Enhanced Onboarding ---
 def render_onboarding():
     st.markdown("""
         <div class="onboarding-container">
-            <h1 style="text-align: center; color: #7F00FF;">🧠 Welcome to BrainWash!</h1>
-            <p style="text-align: center; color: #666; margin-bottom: 30px;">
-                Let's personalize your learning journey
+            <h1 style="text-align: center; color: #7F00FF; margin-bottom: 10px;">
+                🎮 Welcome to BrainWash Arcade!
+            </h1>
+            <p style="text-align: center; color: #666; font-size: 1.1em; margin-bottom: 30px;">
+                Transform boring study materials into epic quests
             </p>
         </div>
     """, unsafe_allow_html=True)
     
+    # System Showcase
+    with st.expander("🌟 What Makes BrainWash Special?", expanded=True):
+        st.markdown("""
+            <div class="showcase-section">
+                <h3>🎯 Gamification That Actually Works</h3>
+                <p>We've turned studying into an RPG-style adventure. Every topic becomes a mission, every completed task earns XP, and your progress unlocks achievements and brain levels!</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+                <div class="feature-box">
+                    <h4>🤖 AI-Powered Personalization</h4>
+                    <p>Our Gemini AI adapts tasks to YOUR learning style, generating custom challenges based on your preferences and materials.</p>
+                </div>
+                
+                <div class="feature-box">
+                    <h4>📊 Smart Analytics</h4>
+                    <p>Track your learning patterns with detailed insights: daily progress, subject distribution, difficulty trends, and more!</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+                <div class="feature-box">
+                    <h4>🎯 Daily Goals & Streaks</h4>
+                    <p>Set personalized daily targets and build consistency with streak tracking. Stay motivated every single day!</p>
+                </div>
+                
+                <div class="feature-box">
+                    <h4>📈 Progress Persistence</h4>
+                    <p>All your data is saved locally. Your XP, achievements, and task history stay with you forever.</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        st.info("💡 **Perfect for**: Students, Lifelong Learners, Professionals upskilling, Anyone who wants to make studying fun!")
+    
+    # How It Works
+    with st.expander("📖 How BrainWash Works"):
+        st.markdown("""
+        ### Your Journey in 4 Simple Steps:
+        
+        **1. 📚 Choose Your Subject**
+        - Enter any topic manually OR upload PDFs/study materials
+        - Our AI scans and understands your content
+        
+        **2. 🎮 Get Your Quests**
+        - Receive 5 personalized tasks (1 Hard, 2 Medium, 2 Easy)
+        - Each task has solutions you can reveal when stuck
+        
+        **3. ✅ Complete & Earn**
+        - Mark tasks as done to earn XP (Easy: 50, Medium: 150, Hard: 300)
+        - Don't like a task? Reroll it for 20 XP!
+        
+        **4. 📊 Track & Improve**
+        - Watch your brain level evolve from 🧟 Brain Rot to 🌌 Galaxy Brain
+        - Analyze your learning patterns in the Insights dashboard
+        - Export your progress to Google Sheets anytime!
+        """)
+        
+        st.success("🏆 **Unlock Achievements**: Earn badges as you hit XP milestones and task counts!")
+    
+    # The Science
+    with st.expander("🧪 The Science Behind BrainWash"):
+        st.markdown("""
+        ### Why Gamification Works for Learning:
+        
+        **🎯 Immediate Feedback Loop**
+        - Instant XP rewards create dopamine hits that reinforce learning behavior
+        - Studies show gamified learning increases engagement by 60%
+        
+        **🔥 Consistency Through Streaks**
+        - Daily goals activate the "commitment and consistency" psychological principle
+        - Streaks leverage loss aversion - you don't want to break the chain!
+        
+        **📈 Mastery Progression**
+        - Clear brain levels provide tangible evidence of improvement
+        - Graduated difficulty (Easy → Medium → Hard) matches Vygotsky's Zone of Proximal Development
+        
+        **🤝 Social Proof Elements**
+        - Achievement badges tap into our need for status and recognition
+        - (Future: Leaderboards will add healthy competition!)
+        
+        **🎨 Personalization = Retention**
+        - AI-adapted tasks align with your learning style and pace
+        - Relevant content increases retention rates by up to 40%
+        """)
+    
+    st.divider()
+    
+    # Setup Form
+    st.markdown("### 🎯 Let's Personalize Your Experience")
+    
     with st.form("onboarding_form"):
-        st.subheader("📝 Basic Info")
-        username = st.text_input("Choose a username", placeholder="brain_master_2024")
+        col1, col2 = st.columns(2)
         
-        st.divider()
-        st.subheader("🎯 Learning Preferences")
+        with col1:
+            subjects = st.text_area(
+                "📚 What subjects are you studying?",
+                placeholder="e.g., Mathematics, Physics, Programming, History",
+                help="Separate multiple subjects with commas",
+                height=100
+            )
+            
+            learning_style = st.selectbox(
+                "🎨 Your learning style?",
+                ["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                 "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"],
+                help="We'll tailor tasks to match your style"
+            )
         
-        subjects = st.text_area(
-            "What subjects are you studying?",
-            placeholder="e.g., Mathematics, Physics, Programming, History",
-            help="Separate with commas"
-        )
+        with col2:
+            weekly_commitment = st.slider(
+                "⏰ Weekly study hours?",
+                min_value=1, max_value=40, value=10,
+                help="This helps us understand your availability"
+            )
+            
+            daily_goal = st.slider(
+                "🎯 Daily task goal?",
+                min_value=1, max_value=20, value=3,
+                help="Start small! You can adjust this later"
+            )
         
-        learning_style = st.selectbox(
-            "What's your learning style?",
-            ["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
-             "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"]
-        )
+        st.markdown("---")
         
-        weekly_commitment = st.slider(
-            "How many hours can you study per week?",
-            min_value=1, max_value=40, value=10
-        )
-        
-        daily_goal = st.slider(
-            "Daily task goal (tasks per day)",
-            min_value=1, max_value=20, value=3,
-            help="How many tasks do you want to complete each day?"
-        )
-        
-        st.divider()
-        st.subheader("🎮 Experience Level")
-        experience = st.radio(
-            "How familiar are you with gamified learning?",
-            ["Complete beginner", "I've tried it before", "I'm a pro!"]
-        )
-        
-        submitted = st.form_submit_button("🚀 Start My Journey!", use_container_width=True, type="primary")
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submitted = st.form_submit_button(
+                "🚀 Launch My Learning Journey!", 
+                use_container_width=True, 
+                type="primary"
+            )
         
         if submitted:
-            if not username:
-                st.error("Please enter a username!")
+            if not subjects:
+                st.error("Please enter at least one subject!")
             else:
                 # Create user in database
                 onboarding_data = {
@@ -539,17 +747,17 @@ def render_onboarding():
                     'daily_goal': daily_goal
                 }
                 
-                user = get_or_create_user(username, onboarding_data)
+                user = get_or_create_user(st.session_state.user_name, onboarding_data)
                 
                 if user:
-                    st.session_state.user_name = username
                     st.session_state.onboarded = True
                     load_user_data()
-                    st.success(f"Welcome aboard, {username}! 🎉")
-                    time.sleep(1)
+                    st.balloons()
+                    st.success(f"🎉 All set, {st.session_state.user_name}! Let's start learning!")
+                    time.sleep(1.5)
                     st.rerun()
 
-# --- 6. Daily Goal Widget ---
+# --- 7. Daily Goal Widget ---
 def render_daily_goal():
     if not st.session_state.user_db_data:
         return
@@ -573,7 +781,7 @@ def render_daily_goal():
     elif today_count >= daily_goal * 0.5:
         st.info(f"💪 Halfway there! {daily_goal - today_count} more to go!")
 
-# --- 7. Insights Dashboard ---
+# --- 8. Insights Dashboard with Export ---
 def render_insights():
     st.title("📊 Learning Insights")
     
@@ -586,6 +794,41 @@ def render_insights():
     if not analytics:
         st.warning("No analytics data available yet.")
         return
+    
+    # Export Button
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col3:
+        if st.button("📤 Export to CSV", use_container_width=True):
+            if analytics['all_tasks']:
+                df = pd.DataFrame(
+                    analytics['all_tasks'],
+                    columns=['Completed At', 'Subject', 'Topic', 'Task', 'Difficulty', 'XP Earned']
+                )
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download CSV",
+                    data=csv,
+                    file_name=f"brainwash_data_{st.session_state.user_name}_{date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("✅ CSV ready for download!")
+            else:
+                st.info("No data to export yet!")
+    
+    with col2:
+        if st.button("📊 View Google Sheets Format", use_container_width=True):
+            if analytics['all_tasks']:
+                df = pd.DataFrame(
+                    analytics['all_tasks'],
+                    columns=['Completed At', 'Subject', 'Topic', 'Task', 'Difficulty', 'XP Earned']
+                )
+                st.dataframe(df, use_container_width=True)
+                st.info("💡 Copy this table and paste into Google Sheets!")
+            else:
+                st.info("No data to export yet!")
+    
+    st.divider()
     
     # Key Metrics
     st.subheader("📈 Overview")
@@ -692,7 +935,7 @@ def render_insights():
     else:
         st.info("No recent tasks to display.")
 
-# --- 8. UI Renderers ---
+# --- 9. Profile with Editable Preferences ---
 def render_profile():
     st.title("👤 Brain Profile")
     
@@ -702,18 +945,43 @@ def render_profile():
     
     user_data = st.session_state.user_db_data
     
-    with st.expander("📝 Edit Profile"):
-        new_goal = st.number_input("Daily Goal", value=user_data['daily_goal'], min_value=1, max_value=20)
-        if st.button("Save Changes"):
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE User SET daily_goal = ? WHERE username = ?", 
-                         (new_goal, st.session_state.user_name))
-            conn.commit()
-            conn.close()
-            load_user_data()
-            st.success("Profile updated!")
-            st.rerun()
+    # Editable Learning Preferences
+    with st.expander("📝 Edit Learning Preferences", expanded=False):
+        with st.form("edit_profile"):
+            new_subjects = st.text_area(
+                "Subjects", 
+                value=user_data['subjects_interested'],
+                help="Separate with commas"
+            )
+            new_style = st.selectbox(
+                "Learning Style",
+                ["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                 "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"],
+                index=["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                       "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"].index(user_data['learning_style'])
+            )
+            new_commitment = st.slider(
+                "Weekly Commitment (hours)",
+                min_value=1, max_value=40, 
+                value=user_data['weekly_commitment']
+            )
+            new_goal = st.slider(
+                "Daily Goal (tasks)",
+                min_value=1, max_value=20, 
+                value=user_data['daily_goal']
+            )
+            
+            if st.form_submit_button("💾 Save Changes", type="primary"):
+                update_user_profile(
+                    st.session_state.user_name,
+                    new_subjects,
+                    new_style,
+                    new_commitment,
+                    new_goal
+                )
+                load_user_data()
+                st.success("✅ Profile updated!")
+                st.rerun()
 
     (lvl_xp, lvl_title, lvl_desc), next_limit = get_brain_status(user_data['total_xp'])
     
@@ -740,6 +1008,7 @@ def render_profile():
                     <div class="stat-box"><strong>Tasks Done:</strong> {user_data['tasks_completed']}</div>
                     <div class="stat-box"><strong>Day Streak:</strong> 🔥 {user_data['streak_days']} Days</div>
                     <div class="stat-box"><strong>Daily Goal:</strong> {user_data['daily_goal']} tasks/day</div>
+                    <div class="stat-box"><strong>Learning Style:</strong> {user_data['learning_style'].split('(')[0]}</div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -833,6 +1102,7 @@ def render_profile():
             load_user_data()
             st.rerun()
     
+# --- 10. Arcade ---
 def render_arcade():
     if not st.session_state.user_db_data:
         st.error("User data not loaded!")
@@ -943,10 +1213,12 @@ def render_arcade():
             st.session_state.user_details = {}
             st.rerun()
 
-# --- 9. Main App Logic ---
+# --- 11. Main App Logic ---
 
-# Check if user is onboarded
-if not st.session_state.onboarded or not st.session_state.user_name:
+# Check authentication
+if not st.session_state.authenticated:
+    render_login()
+elif not st.session_state.onboarded:
     render_onboarding()
 else:
     # Load user data if not loaded
