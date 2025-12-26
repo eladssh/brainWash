@@ -11,179 +11,44 @@ from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 import sqlite3
 from pathlib import Path
-from collections import defaultdict
-import numpy as np
+import io
 
-# --- 1. ADVANCED DATABASE SCHEMA ---
-DB_PATH = Path("brainwash_advanced.db")
+# --- 1. Database Setup ---
+DB_PATH = Path("brainwash.db")
 
 def init_database():
-    """Initialize comprehensive database schema"""
+    """Initialize SQLite database with User and TaskCompletion tables"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # User table with onboarding data
+    # User table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS User (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             total_xp INTEGER DEFAULT 0,
             tasks_completed INTEGER DEFAULT 0,
-            current_streak INTEGER DEFAULT 0,
-            longest_streak INTEGER DEFAULT 0,
+            daily_goal INTEGER DEFAULT 3,
+            streak_days INTEGER DEFAULT 0,
             last_activity_date TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            -- Onboarding data
             subjects_interested TEXT,
             learning_style TEXT,
-            weekly_hours_available INTEGER DEFAULT 10,
-            motivation_level TEXT DEFAULT 'Medium',
-            self_assessed_skill TEXT DEFAULT 'Intermediate',
-            urgency_level TEXT DEFAULT 'Moderate',
-            -- Adaptive settings
-            xp_multiplier REAL DEFAULT 1.0,
-            reroll_cost INTEGER DEFAULT 20,
-            unlocked_features TEXT DEFAULT '[]'
+            weekly_commitment INTEGER DEFAULT 3
         )
     """)
     
-    # Goals table - goals as first-class entities
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Goal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            goal_type TEXT NOT NULL, -- 'daily' or 'weekly'
-            target_tasks INTEGER NOT NULL,
-            target_xp INTEGER,
-            target_focus_minutes INTEGER,
-            period_start TEXT NOT NULL,
-            period_end TEXT NOT NULL,
-            status TEXT DEFAULT 'active', -- active, completed, failed
-            actual_tasks INTEGER DEFAULT 0,
-            actual_xp INTEGER DEFAULT 0,
-            actual_focus_minutes INTEGER DEFAULT 0,
-            completion_rate REAL DEFAULT 0.0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            completed_at TEXT,
-            adjustment_reason TEXT,
-            FOREIGN KEY (user_id) REFERENCES User(id)
-        )
-    """)
-    
-    # Task lifecycle tracking
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Task (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            task_text TEXT NOT NULL,
-            difficulty TEXT NOT NULL,
-            xp_value INTEGER NOT NULL,
-            subject TEXT,
-            topic TEXT,
-            state TEXT DEFAULT 'new', -- new, in_progress, completed, skipped, failed
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            started_at TEXT,
-            completed_at TEXT,
-            time_spent_seconds INTEGER DEFAULT 0,
-            attempts INTEGER DEFAULT 0,
-            solution TEXT,
-            FOREIGN KEY (user_id) REFERENCES User(id)
-        )
-    """)
-    
-    # Task completions with behavioral data
+    # TaskCompletion table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS TaskCompletion (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            task_id INTEGER NOT NULL,
             task_text TEXT NOT NULL,
             difficulty TEXT NOT NULL,
             xp_earned INTEGER NOT NULL,
-            xp_multiplier REAL DEFAULT 1.0,
             subject TEXT,
             topic TEXT,
             completed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            time_to_complete_seconds INTEGER,
-            attempts_made INTEGER DEFAULT 1,
-            solution_viewed BOOLEAN DEFAULT 0,
-            focus_session_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES User(id),
-            FOREIGN KEY (task_id) REFERENCES Task(id),
-            FOREIGN KEY (focus_session_id) REFERENCES FocusSession(id)
-        )
-    """)
-    
-    # Focus sessions as measurable data
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS FocusSession (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            duration_minutes INTEGER NOT NULL,
-            started_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            completed_at TEXT,
-            interruptions INTEGER DEFAULT 0,
-            tasks_completed INTEGER DEFAULT 0,
-            xp_earned INTEGER DEFAULT 0,
-            efficiency_score REAL, -- XP per minute
-            session_quality TEXT, -- excellent, good, average, poor
-            FOREIGN KEY (user_id) REFERENCES User(id)
-        )
-    """)
-    
-    # Task state transitions (for behavioral analysis)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS TaskStateTransition (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER NOT NULL,
-            from_state TEXT,
-            to_state TEXT NOT NULL,
-            reason TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (task_id) REFERENCES Task(id)
-        )
-    """)
-    
-    # Goal adjustments log
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS GoalAdjustment (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            old_daily_target INTEGER,
-            new_daily_target INTEGER,
-            adjustment_type TEXT, -- increase, decrease, maintain
-            reason TEXT,
-            performance_trend TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES User(id)
-        )
-    """)
-    
-    # Achievements with behavioral requirements
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Achievement (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            achievement_type TEXT NOT NULL,
-            achievement_name TEXT NOT NULL,
-            earned_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            reward_type TEXT, -- xp_multiplier, reroll_discount, feature_unlock
-            reward_value TEXT,
-            FOREIGN KEY (user_id) REFERENCES User(id)
-        )
-    """)
-    
-    # KPI tracking
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS KPI (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            date TEXT NOT NULL,
-            learning_efficiency REAL, -- XP per focus minute
-            task_completion_rate REAL,
-            avg_task_time_seconds REAL,
-            focus_quality_score REAL,
-            consistency_score REAL,
             FOREIGN KEY (user_id) REFERENCES User(id)
         )
     """)
@@ -191,801 +56,219 @@ def init_database():
     conn.commit()
     conn.close()
 
-# Initialize database
-init_database()
-
-# --- 2. DATA ACCESS LAYER ---
-
-class UserDataManager:
-    """Manages all user data operations"""
+def get_or_create_user(username, onboarding_data=None):
+    """Get existing user or create new one"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     
-    @staticmethod
-    def create_user(username, onboarding_data):
-        """Create new user with onboarding data"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
+    cursor.execute("SELECT * FROM User WHERE username = ?", (username,))
+    user = cursor.fetchone()
+    
+    if not user and onboarding_data:
         cursor.execute("""
-            INSERT INTO User (
-                username, subjects_interested, learning_style,
-                weekly_hours_available, motivation_level,
-                self_assessed_skill, urgency_level
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO User (username, subjects_interested, learning_style, weekly_commitment, daily_goal)
+            VALUES (?, ?, ?, ?, ?)
         """, (
             username,
             onboarding_data.get('subjects', ''),
-            onboarding_data.get('learning_style', 'Visual'),
-            onboarding_data.get('weekly_hours', 10),
-            onboarding_data.get('motivation_level', 'Medium'),
-            onboarding_data.get('skill_level', 'Intermediate'),
-            onboarding_data.get('urgency', 'Moderate')
+            onboarding_data.get('style', ''),
+            onboarding_data.get('commitment', 3),
+            onboarding_data.get('daily_goal', 3)
         ))
-        
-        user_id = cursor.lastrowid
         conn.commit()
-        
-        # Create initial goals
-        GoalManager.create_initial_goals(user_id, onboarding_data)
-        
-        conn.close()
-        return user_id
-    
-    @staticmethod
-    def get_user(username):
-        """Get user data"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
         cursor.execute("SELECT * FROM User WHERE username = ?", (username,))
         user = cursor.fetchone()
-        conn.close()
-        return user
     
-    @staticmethod
-    def user_exists(username):
-        """Check if user exists"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
-        exists = cursor.fetchone() is not None
-        conn.close()
-        return exists
-    
-    @staticmethod
-    def update_xp_and_streak(username, xp_gained, multiplier=1.0):
-        """Update XP and streak"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, total_xp, current_streak, longest_streak, last_activity_date
-            FROM User WHERE username = ?
-        """, (username,))
-        user = cursor.fetchone()
-        
-        if user:
-            user_id, current_xp, streak, longest, last_date = user
-            new_xp = current_xp + int(xp_gained * multiplier)
-            
-            today = str(date.today())
-            new_streak = streak
-            
-            if last_date != today:
-                if last_date == str(date.today() - timedelta(days=1)):
-                    new_streak = streak + 1
-                else:
-                    new_streak = 1
-            
-            new_longest = max(new_streak, longest or 0)
-            
-            cursor.execute("""
-                UPDATE User 
-                SET total_xp = ?, current_streak = ?, longest_streak = ?,
-                    last_activity_date = ?
-                WHERE username = ?
-            """, (new_xp, new_streak, new_longest, today, username))
-            
-            conn.commit()
-        
-        conn.close()
+    conn.close()
+    return user
 
-class GoalManager:
-    """Manages adaptive goal system"""
-    
-    @staticmethod
-    def create_initial_goals(user_id, onboarding_data):
-        """Create initial daily/weekly goals based on onboarding"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Calculate initial targets from onboarding
-        weekly_hours = onboarding_data.get('weekly_hours', 10)
-        motivation = onboarding_data.get('motivation_level', 'Medium')
-        urgency = onboarding_data.get('urgency', 'Moderate')
-        
-        # Base daily tasks
-        base_tasks = 3
-        if motivation == 'High' or urgency == 'Urgent':
-            base_tasks = 5
-        elif motivation == 'Low':
-            base_tasks = 2
-        
-        # Daily goal
-        today = date.today()
-        cursor.execute("""
-            INSERT INTO Goal (
-                user_id, goal_type, target_tasks, target_xp, target_focus_minutes,
-                period_start, period_end, status
-            ) VALUES (?, 'daily', ?, ?, ?, ?, ?, 'active')
-        """, (user_id, base_tasks, base_tasks * 100, 25, str(today), str(today), 'active'))
-        
-        # Weekly goal
-        week_start = today - timedelta(days=today.weekday())
-        week_end = week_start + timedelta(days=6)
-        cursor.execute("""
-            INSERT INTO Goal (
-                user_id, goal_type, target_tasks, target_xp, target_focus_minutes,
-                period_start, period_end, status
-            ) VALUES (?, 'weekly', ?, ?, ?, ?, ?, 'active')
-        """, (user_id, base_tasks * 5, base_tasks * 500, weekly_hours * 60 // 2, 
-              str(week_start), str(week_end), 'active'))
-        
-        conn.commit()
-        conn.close()
-    
-    @staticmethod
-    def get_active_goals(user_id):
-        """Get current active goals"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        today = str(date.today())
-        cursor.execute("""
-            SELECT * FROM Goal 
-            WHERE user_id = ? AND status = 'active'
-            AND period_start <= ? AND period_end >= ?
-            ORDER BY goal_type
-        """, (user_id, today, today))
-        
-        goals = cursor.fetchall()
-        conn.close()
-        return goals
-    
-    @staticmethod
-    def update_goal_progress(user_id, tasks_increment=0, xp_increment=0, focus_minutes_increment=0):
-        """Update goal progress"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        today = str(date.today())
-        cursor.execute("""
-            UPDATE Goal 
-            SET actual_tasks = actual_tasks + ?,
-                actual_xp = actual_xp + ?,
-                actual_focus_minutes = actual_focus_minutes + ?
-            WHERE user_id = ? AND status = 'active'
-            AND period_start <= ? AND period_end >= ?
-        """, (tasks_increment, xp_increment, focus_minutes_increment, user_id, today, today))
-        
-        conn.commit()
-        conn.close()
-    
-    @staticmethod
-    def evaluate_and_adjust_goals(user_id):
-        """Evaluate completed goals and adjust future targets adaptively"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Get last 7 daily goals
-        cursor.execute("""
-            SELECT target_tasks, actual_tasks, completion_rate
-            FROM Goal
-            WHERE user_id = ? AND goal_type = 'daily'
-            AND status IN ('completed', 'failed')
-            ORDER BY period_end DESC
-            LIMIT 7
-        """, (user_id,))
-        
-        recent_goals = cursor.fetchall()
-        
-        if len(recent_goals) < 3:
-            conn.close()
-            return None  # Not enough data yet
-        
-        # Calculate success rate
-        success_count = sum(1 for g in recent_goals if (g[1] or 0) >= (g[0] or 1))
-        success_rate = success_count / len(recent_goals)
-        
-        # Get current daily target
-        cursor.execute("""
-            SELECT target_tasks FROM Goal
-            WHERE user_id = ? AND goal_type = 'daily' AND status = 'active'
-            LIMIT 1
-        """, (user_id,))
-        
-        current = cursor.fetchone()
-        if not current:
-            conn.close()
-            return None
-        
-        current_target = current[0]
-        new_target = current_target
-        adjustment_type = 'maintain'
-        reason = ''
-        
-        # Adaptive logic
-        if success_rate >= 0.85:  # Consistent overachievement
-            new_target = min(current_target + 1, 20)
-            adjustment_type = 'increase'
-            reason = f'High success rate ({success_rate:.0%}). Ready for more challenge.'
-        elif success_rate <= 0.3:  # Consistent failure
-            new_target = max(current_target - 1, 1)
-            adjustment_type = 'decrease'
-            reason = f'Low success rate ({success_rate:.0%}). Reducing target to build consistency.'
-        else:
-            reason = f'Moderate success rate ({success_rate:.0%}). Maintaining current target.'
-        
-        # Log adjustment
-        if new_target != current_target:
-            cursor.execute("""
-                INSERT INTO GoalAdjustment (
-                    user_id, old_daily_target, new_daily_target,
-                    adjustment_type, reason, performance_trend
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, current_target, new_target, adjustment_type, reason, 
-                  f'{success_rate:.0%} success'))
-            
-            conn.commit()
-        
-        conn.close()
-        return {
-            'old_target': current_target,
-            'new_target': new_target,
-            'adjustment_type': adjustment_type,
-            'reason': reason,
-            'success_rate': success_rate
-        }
-    
-    @staticmethod
-    def finalize_period_goals(user_id):
-        """Finalize goals at end of period"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        today = str(date.today())
-        
-        # Find expired active goals
-        cursor.execute("""
-            SELECT id, target_tasks, actual_tasks, target_xp, actual_xp
-            FROM Goal
-            WHERE user_id = ? AND status = 'active' AND period_end < ?
-        """, (user_id, today))
-        
-        expired_goals = cursor.fetchall()
-        
-        for goal_id, target_tasks, actual_tasks, target_xp, actual_xp in expired_goals:
-            completion_rate = (actual_tasks or 0) / max(target_tasks, 1)
-            status = 'completed' if completion_rate >= 0.8 else 'failed'
-            
-            cursor.execute("""
-                UPDATE Goal
-                SET status = ?, completion_rate = ?, completed_at = ?
-                WHERE id = ?
-            """, (status, completion_rate, today, goal_id))
-        
-        conn.commit()
-        conn.close()
-        
-        # Trigger adaptive adjustment
-        if expired_goals:
-            return GoalManager.evaluate_and_adjust_goals(user_id)
-        return None
+def user_exists(username):
+    """Check if username exists"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
-class TaskManager:
-    """Manages task lifecycle and state transitions"""
+def update_user_stats(username, xp_gained=0, task_completed=False):
+    """Update user XP, tasks, and streak"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     
-    @staticmethod
-    def create_task(user_id, task_data, subject, topic):
-        """Create new task"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO Task (
-                user_id, task_text, difficulty, xp_value,
-                subject, topic, solution, state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'new')
-        """, (
-            user_id,
-            task_data['text'],
-            task_data['difficulty'],
-            task_data['xp'],
-            subject,
-            topic,
-            task_data.get('solution', '')
-        ))
-        
-        task_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return task_id
+    # Get current user data
+    cursor.execute("SELECT id, total_xp, tasks_completed, streak_days, last_activity_date FROM User WHERE username = ?", (username,))
+    user = cursor.fetchone()
     
-    @staticmethod
-    def transition_task_state(task_id, new_state, reason=None):
-        """Record task state transition"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+    if user:
+        user_id, current_xp, current_tasks, streak, last_date = user
+        new_xp = current_xp + xp_gained
+        new_tasks = current_tasks + (1 if task_completed else 0)
         
-        # Get current state
-        cursor.execute("SELECT state FROM Task WHERE id = ?", (task_id,))
-        current = cursor.fetchone()
-        
-        if current:
-            old_state = current[0]
-            
-            # Update task state
-            update_fields = ["state = ?"]
-            update_values = [new_state]
-            
-            if new_state == 'in_progress' and old_state == 'new':
-                update_fields.append("started_at = ?")
-                update_values.append(datetime.now().isoformat())
-            elif new_state == 'completed':
-                update_fields.append("completed_at = ?")
-                update_values.append(datetime.now().isoformat())
-            
-            update_values.append(task_id)
-            
-            cursor.execute(f"""
-                UPDATE Task SET {', '.join(update_fields)} WHERE id = ?
-            """, update_values)
-            
-            # Log transition
-            cursor.execute("""
-                INSERT INTO TaskStateTransition (task_id, from_state, to_state, reason)
-                VALUES (?, ?, ?, ?)
-            """, (task_id, old_state, new_state, reason))
-            
-            conn.commit()
-        
-        conn.close()
-    
-    @staticmethod
-    def complete_task(task_id, user_id, xp_earned, multiplier, time_spent, solution_viewed):
-        """Complete task and record completion data"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Get task details
-        cursor.execute("""
-            SELECT task_text, difficulty, xp_value, subject, topic, attempts
-            FROM Task WHERE id = ?
-        """, (task_id,))
-        
-        task = cursor.fetchone()
-        
-        if task:
-            task_text, difficulty, xp_value, subject, topic, attempts = task
-            
-            # Update task
-            cursor.execute("""
-                UPDATE Task
-                SET state = 'completed', completed_at = ?, time_spent_seconds = ?, attempts = ?
-                WHERE id = ?
-            """, (datetime.now().isoformat(), time_spent, attempts + 1, task_id))
-            
-            # Record completion
-            cursor.execute("""
-                INSERT INTO TaskCompletion (
-                    user_id, task_id, task_text, difficulty, xp_earned,
-                    xp_multiplier, subject, topic, time_to_complete_seconds,
-                    attempts_made, solution_viewed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, task_id, task_text, difficulty, xp_earned, multiplier,
-                  subject, topic, time_spent, attempts + 1, solution_viewed))
-            
-            conn.commit()
-        
-        conn.close()
-
-class FocusSessionManager:
-    """Manages focus sessions"""
-    
-    @staticmethod
-    def start_session(user_id, duration_minutes):
-        """Start new focus session"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO FocusSession (user_id, duration_minutes, started_at)
-            VALUES (?, ?, ?)
-        """, (user_id, duration_minutes, datetime.now().isoformat()))
-        
-        session_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return session_id
-    
-    @staticmethod
-    def complete_session(session_id, tasks_completed, xp_earned, interruptions=0):
-        """Complete focus session and calculate efficiency"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT user_id, duration_minutes, started_at
-            FROM FocusSession WHERE id = ?
-        """, (session_id,))
-        
-        session = cursor.fetchone()
-        
-        if session:
-            user_id, duration, started = session
-            efficiency = xp_earned / max(duration, 1)
-            
-            # Quality assessment
-            if efficiency >= 15 and interruptions == 0:
-                quality = 'excellent'
-            elif efficiency >= 10:
-                quality = 'good'
-            elif efficiency >= 5:
-                quality = 'average'
+        # Update streak
+        today = str(date.today())
+        new_streak = streak
+        if last_date != today:
+            if last_date == str(date.today() - timedelta(days=1)):
+                new_streak = streak + 1
             else:
-                quality = 'poor'
-            
-            cursor.execute("""
-                UPDATE FocusSession
-                SET completed_at = ?, interruptions = ?, tasks_completed = ?,
-                    xp_earned = ?, efficiency_score = ?, session_quality = ?
-                WHERE id = ?
-            """, (datetime.now().isoformat(), interruptions, tasks_completed,
-                  xp_earned, efficiency, quality, session_id))
-            
-            conn.commit()
-        
-        conn.close()
-
-class AnalyticsEngine:
-    """Advanced analytics and insights generation"""
-    
-    @staticmethod
-    def calculate_learning_efficiency(user_id, days=7):
-        """Calculate XP per focus minute"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cutoff = str(date.today() - timedelta(days=days))
+                new_streak = 1
         
         cursor.execute("""
-            SELECT SUM(xp_earned), SUM(duration_minutes)
-            FROM FocusSession
-            WHERE user_id = ? AND DATE(started_at) >= ? AND completed_at IS NOT NULL
-        """, (user_id, cutoff))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[1]:
-            return result[0] / result[1]
-        return 0.0
-    
-    @staticmethod
-    def generate_behavioral_insights(user_id):
-        """Generate textual insights from behavioral data"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        insights = []
-        
-        # Insight 1: Difficulty preference
-        cursor.execute("""
-            SELECT difficulty, COUNT(*) as count, AVG(time_to_complete_seconds) as avg_time
-            FROM TaskCompletion
-            WHERE user_id = ?
-            GROUP BY difficulty
-            ORDER BY count DESC
-        """, (user_id,))
-        
-        diff_data = cursor.fetchall()
-        if diff_data:
-            top_diff = diff_data[0][0]
-            top_count = diff_data[0][1]
-            
-            if len(diff_data) >= 2:
-                completion_ratio = top_count / sum(d[1] for d in diff_data)
-                if completion_ratio > 0.5:
-                    insights.append({
-                        'type': 'difficulty_preference',
-                        'text': f"You complete {top_diff} tasks more consistently ({completion_ratio:.0%} of all tasks). Consider challenging yourself with more variety.",
-                        'action': 'Try harder difficulties'
-                    })
-        
-        # Insight 2: Focus session quality
-        cursor.execute("""
-            SELECT AVG(efficiency_score), session_quality, COUNT(*)
-            FROM FocusSession
-            WHERE user_id = ? AND completed_at IS NOT NULL
-            GROUP BY session_quality
-            ORDER BY COUNT(*) DESC
-        """, (user_id,))
-        
-        focus_data = cursor.fetchall()
-        if focus_data:
-            avg_eff = focus_data[0][0]
-            if avg_eff and avg_eff > 10:
-                insights.append({
-                    'type': 'focus_quality',
-                    'text': f"Your focus sessions are highly efficient (avg {avg_eff:.1f} XP/min). Longer sessions could multiply your progress.",
-                    'action': 'Increase session duration'
-                })
-        
-        # Insight 3: Streak consistency
-        cursor.execute("""
-            SELECT current_streak, longest_streak
-            FROM User WHERE id = ?
-        """, (user_id,))
-        
-        streak_data = cursor.fetchone()
-        if streak_data:
-            current, longest = streak_data
-            if current and longest and current >= longest * 0.8:
-                insights.append({
-                    'type': 'consistency',
-                    'text': f"Amazing! You're at {current} days - near your record of {longest}. Keep this momentum!",
-                    'action': 'Maintain streak'
-                })
-        
-        # Insight 4: Time efficiency by difficulty
-        cursor.execute("""
-            SELECT difficulty, 
-                   AVG(CAST(xp_earned AS FLOAT) / NULLIF(time_to_complete_seconds, 0)) * 60 as xp_per_min
-            FROM TaskCompletion
-            WHERE user_id = ? AND time_to_complete_seconds > 0
-            GROUP BY difficulty
-        """, (user_id,))
-        
-        eff_by_diff = cursor.fetchall()
-        if len(eff_by_diff) >= 2:
-            eff_sorted = sorted(eff_by_diff, key=lambda x: x[1] or 0, reverse=True)
-            best_diff = eff_sorted[0][0]
-            best_rate = eff_sorted[0][1]
-            
-            if best_rate:
-                insights.append({
-                    'type': 'efficiency',
-                    'text': f"{best_diff} tasks give you the best XP return ({best_rate:.1f} XP/min). This is your sweet spot!",
-                    'action': f'Focus on {best_diff} tasks'
-                })
-        
-        # Insight 5: Solution dependency
-        cursor.execute("""
-            SELECT AVG(CASE WHEN solution_viewed = 1 THEN 1.0 ELSE 0.0 END) * 100 as pct
-            FROM TaskCompletion
-            WHERE user_id = ?
-        """, (user_id,))
-        
-        solution_pct = cursor.fetchone()[0]
-        if solution_pct and solution_pct > 60:
-            insights.append({
-                'type': 'learning_approach',
-                'text': f"You view solutions {solution_pct:.0f}% of the time. Try solving independently first for deeper learning.",
-                'action': 'Reduce solution viewing'
-            })
-        
-        conn.close()
-        return insights
-    
-    @staticmethod
-    def calculate_kpis(user_id):
-        """Calculate key performance indicators"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        today = str(date.today())
-        
-        # Learning efficiency
-        efficiency = AnalyticsEngine.calculate_learning_efficiency(user_id, days=7)
-        
-        # Task completion rate (vs attempts)
-        cursor.execute("""
-            SELECT 
-                COUNT(CASE WHEN state = 'completed' THEN 1 END) * 1.0 / COUNT(*) as rate
-            FROM Task
-            WHERE user_id = ? AND DATE(created_at) >= DATE('now', '-7 days')
-        """, (user_id,))
-        
-        completion_rate = cursor.fetchone()[0] or 0
-        
-        # Average task time
-        cursor.execute("""
-            SELECT AVG(time_to_complete_seconds)
-            FROM TaskCompletion
-            WHERE user_id = ? AND DATE(completed_at) >= DATE('now', '-7 days')
-        """, (user_id,))
-        
-        avg_time = cursor.fetchone()[0] or 0
-        
-        # Focus quality
-        cursor.execute("""
-            SELECT AVG(efficiency_score)
-            FROM FocusSession
-            WHERE user_id = ? AND DATE(started_at) >= DATE('now', '-7 days')
-            AND completed_at IS NOT NULL
-        """, (user_id,))
-        
-        focus_quality = cursor.fetchone()[0] or 0
-        
-        # Consistency (tasks per day)
-        cursor.execute("""
-            SELECT COUNT(DISTINCT DATE(completed_at))
-            FROM TaskCompletion
-            WHERE user_id = ? AND DATE(completed_at) >= DATE('now', '-7 days')
-        """, (user_id,))
-        
-        active_days = cursor.fetchone()[0] or 0
-        consistency = active_days / 7.0
-        
-        # Store KPI
-        cursor.execute("""
-            INSERT INTO KPI (
-                user_id, date, learning_efficiency, task_completion_rate,
-                avg_task_time_seconds, focus_quality_score, consistency_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, today, efficiency, completion_rate, avg_time, focus_quality, consistency))
+            UPDATE User 
+            SET total_xp = ?, tasks_completed = ?, streak_days = ?, last_activity_date = ?
+            WHERE username = ?
+        """, (new_xp, new_tasks, new_streak, today, username))
         
         conn.commit()
-        conn.close()
-        
-        return {
-            'learning_efficiency': efficiency,
-            'completion_rate': completion_rate,
-            'avg_task_time': avg_time,
-            'focus_quality': focus_quality,
-            'consistency': consistency
-        }
+    
+    conn.close()
 
-class AchievementSystem:
-    """Behavioral-based achievement system"""
+def update_user_profile(username, subjects, learning_style, weekly_commitment, daily_goal):
+    """Update user learning preferences"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE User 
+        SET subjects_interested = ?, learning_style = ?, weekly_commitment = ?, daily_goal = ?
+        WHERE username = ?
+    """, (subjects, learning_style, weekly_commitment, daily_goal, username))
+    conn.commit()
+    conn.close()
+
+def log_task_completion(username, task_text, difficulty, xp_earned, subject, topic):
+    """Log a completed task"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     
-    ACHIEVEMENTS_CONFIG = [
-        {
-            'id': 'efficiency_master',
-            'name': 'Efficiency Master',
-            'emoji': '⚡',
-            'requirement': lambda data: data.get('learning_efficiency', 0) >= 12,
-            'reward_type': 'xp_multiplier',
-            'reward_value': '1.2',
-            'description': 'Maintain 12+ XP/min efficiency'
-        },
-        {
-            'id': 'consistency_king',
-            'name': 'Consistency King',
-            'emoji': '👑',
-            'requirement': lambda data: data.get('current_streak', 0) >= 7,
-            'reward_type': 'reroll_discount',
-            'reward_value': '50',
-            'description': '7-day streak'
-        },
-        {
-            'id': 'balanced_learner',
-            'name': 'Balanced Learner',
-            'emoji': '⚖️',
-            'requirement': lambda data: AchievementSystem._check_balanced_difficulty(data['user_id']),
-            'reward_type': 'xp_multiplier',
-            'reward_value': '1.15',
-            'description': 'Complete all difficulty levels evenly'
-        },
-        {
-            'id': 'focus_champion',
-            'name': 'Focus Champion',
-            'emoji': '🎯',
-            'requirement': lambda data: data.get('focus_sessions_excellent', 0) >= 5,
-            'reward_type': 'feature_unlock',
-            'reward_value': 'advanced_analytics',
-            'description': '5 excellent focus sessions'
-        }
-    ]
+    cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
+    user = cursor.fetchone()
     
-    @staticmethod
-    def _check_balanced_difficulty(user_id):
-        """Check if user completes all difficulties relatively evenly"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
+    if user:
         cursor.execute("""
-            SELECT difficulty, COUNT(*) as count
-            FROM TaskCompletion
-            WHERE user_id = ?
-            GROUP BY difficulty
-        """, (user_id,))
-        
-        counts = {row[0]: row[1] for row in cursor.fetchall()}
-        conn.close()
-        
-        if len(counts) < 3:
-            return False
-        
-        values = list(counts.values())
-        if not values:
-            return False
-        
-        max_val = max(values)
-        min_val = min(values)
-        
-        # Check if all difficulties are within 50% of each other
-        return (min_val / max_val) >= 0.5 if max_val > 0 else False
-    
-    @staticmethod
-    def check_and_award_achievements(user_id):
-        """Check for new achievements and award them"""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Get existing achievements
-        cursor.execute("""
-            SELECT achievement_type FROM Achievement WHERE user_id = ?
-        """, (user_id,))
-        
-        existing = {row[0] for row in cursor.fetchall()}
-        
-        # Gather user data for requirements
-        cursor.execute("SELECT * FROM User WHERE id = ?", (user_id,))
-        user_row = cursor.fetchone()
-        
-        kpis = AnalyticsEngine.calculate_kpis(user_id)
-        
-        cursor.execute("""
-            SELECT COUNT(*) FROM FocusSession
-            WHERE user_id = ? AND session_quality = 'excellent'
-        """, (user_id,))
-        excellent_sessions = cursor.fetchone()[0]
-        
-        user_data = {
-            'user_id': user_id,
-            'current_streak': user_row[9] if user_row else 0,
-            'learning_efficiency': kpis['learning_efficiency'],
-            'focus_sessions_excellent': excellent_sessions
-        }
-        
-        newly_earned = []
-        
-        for achievement in AchievementSystem.ACHIEVEMENTS_CONFIG:
-            if achievement['id'] not in existing:
-                if achievement['requirement'](user_data):
-                    cursor.execute("""
-                        INSERT INTO Achievement (
-                            user_id, achievement_type, achievement_name,
-                            reward_type, reward_value
-                        ) VALUES (?, ?, ?, ?, ?)
-                    """, (user_id, achievement['id'], achievement['name'],
-                          achievement['reward_type'], achievement['reward_value']))
-                    
-                    newly_earned.append(achievement)
-                    
-                    # Apply reward
-                    if achievement['reward_type'] == 'xp_multiplier':
-                        cursor.execute("""
-                            UPDATE User SET xp_multiplier = ?
-                            WHERE id = ?
-                        """, (float(achievement['reward_value']), user_id))
-                    elif achievement['reward_type'] == 'reroll_discount':
-                        discount_pct = float(achievement['reward_value']) / 100
-                        cursor.execute("""
-                            UPDATE User SET reroll_cost = CAST(reroll_cost * ? AS INTEGER)
-                            WHERE id = ?
-                        """, (1 - discount_pct, user_id))
-        
+            INSERT INTO TaskCompletion (user_id, task_text, difficulty, xp_earned, subject, topic)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user[0], task_text, difficulty, xp_earned, subject, topic))
         conn.commit()
-        conn.close()
-        
-        return newly_earned
+    
+    conn.close()
 
-# --- 3. STREAMLIT CONFIG & INIT ---
+def get_user_analytics(username):
+    """Get analytics data for insights dashboard"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get user ID
+    cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
+    user = cursor.fetchone()
+    
+    if not user:
+        conn.close()
+        return None
+    
+    user_id = user[0]
+    
+    # Tasks by day (last 7 days)
+    cursor.execute("""
+        SELECT DATE(completed_at) as day, COUNT(*) as count
+        FROM TaskCompletion
+        WHERE user_id = ? AND DATE(completed_at) >= DATE('now', '-7 days')
+        GROUP BY DATE(completed_at)
+        ORDER BY day
+    """, (user_id,))
+    daily_tasks = cursor.fetchall()
+    
+    # XP by day (last 7 days)
+    cursor.execute("""
+        SELECT DATE(completed_at) as day, SUM(xp_earned) as total_xp
+        FROM TaskCompletion
+        WHERE user_id = ? AND DATE(completed_at) >= DATE('now', '-7 days')
+        GROUP BY DATE(completed_at)
+        ORDER BY day
+    """, (user_id,))
+    daily_xp = cursor.fetchall()
+    
+    # Tasks by difficulty
+    cursor.execute("""
+        SELECT difficulty, COUNT(*) as count
+        FROM TaskCompletion
+        WHERE user_id = ?
+        GROUP BY difficulty
+    """, (user_id,))
+    difficulty_breakdown = cursor.fetchall()
+    
+    # Tasks by subject
+    cursor.execute("""
+        SELECT subject, COUNT(*) as count, SUM(xp_earned) as total_xp
+        FROM TaskCompletion
+        WHERE user_id = ?
+        GROUP BY subject
+        ORDER BY count DESC
+        LIMIT 5
+    """, (user_id,))
+    subject_stats = cursor.fetchall()
+    
+    # Recent tasks
+    cursor.execute("""
+        SELECT task_text, difficulty, xp_earned, subject, completed_at
+        FROM TaskCompletion
+        WHERE user_id = ?
+        ORDER BY completed_at DESC
+        LIMIT 10
+    """, (user_id,))
+    recent_tasks = cursor.fetchall()
+    
+    # All tasks for export
+    cursor.execute("""
+        SELECT completed_at, subject, topic, task_text, difficulty, xp_earned
+        FROM TaskCompletion
+        WHERE user_id = ?
+        ORDER BY completed_at DESC
+    """, (user_id,))
+    all_tasks = cursor.fetchall()
+    
+    conn.close()
+    
+    return {
+        'daily_tasks': daily_tasks,
+        'daily_xp': daily_xp,
+        'difficulty_breakdown': difficulty_breakdown,
+        'subject_stats': subject_stats,
+        'recent_tasks': recent_tasks,
+        'all_tasks': all_tasks
+    }
+
+def get_today_progress(username):
+    """Get today's task completion count"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM User WHERE username = ?", (username,))
+    user = cursor.fetchone()
+    
+    if not user:
+        conn.close()
+        return 0
+    
+    today = str(date.today())
+    cursor.execute("""
+        SELECT COUNT(*) FROM TaskCompletion
+        WHERE user_id = ? AND DATE(completed_at) = ?
+    """, (user[0], today))
+    
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+# Initialize database
+init_database()
+
+# --- 2. Init & Config ---
 load_dotenv()
 API_KEY = st.secrets.get("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 st.set_page_config(
-    page_title="BrainWash: Data-Driven Learning",
+    page_title="BrainWash: Arcade",
     page_icon="🧠",
     layout="wide"
 )
@@ -993,20 +276,80 @@ st.set_page_config(
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f9; }
-    .insight-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 15px;
-        margin: 10px 0;
-    }
-    .kpi-card {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    
+    .white-card {
+        background: white; 
+        padding: 25px; 
+        border-radius: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        border: 1px solid #eef2f6; 
         text-align: center;
+        height: 400px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
     }
+    
+    .white-card h3 {
+        margin: 0 0 15px 0;
+        flex-shrink: 0;
+    }
+    
+    .scrollable-content {
+        overflow-y: auto;
+        overflow-x: hidden;
+        flex-grow: 1;
+        text-align: left;
+        padding-right: 5px;
+    }
+
+    .stat-box {
+        background: #f8f9fa; 
+        border-radius: 12px; 
+        padding: 15px;
+        margin-bottom: 10px; 
+        border: 1px solid #eee;
+        word-wrap: break-word;
+    }
+
+    .brain-avatar { 
+        font-size: 70px; 
+        display: block; 
+        margin-bottom: 10px;
+        animation: float 3s ease-in-out infinite;
+    }
+    @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+
+    .friend-row {
+        display: flex; 
+        align-items: center; 
+        justify-content: space-between;
+        padding: 10px 0; 
+        border-bottom: 1px solid #f8f9fa;
+        font-size: 0.9em;
+        word-wrap: break-word;
+    }
+    
+    .friend-row > div {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .status-dot { 
+        height: 10px; 
+        width: 10px; 
+        border-radius: 50%; 
+        display: inline-block; 
+        flex-shrink: 0;
+        margin-left: 10px;
+    }
+    .online { background-color: #66bb6a; }
+    .offline { background-color: #bdbdbd; }
+
     .task-card {
         background: white; 
         padding: 20px; 
@@ -1018,36 +361,86 @@ st.markdown("""
     .diff-Hard { border-left-color: #ff4b4b; } 
     .diff-Medium { border-left-color: #ffa726; } 
     .diff-Easy { border-left-color: #66bb6a; }
-    .achievement-badge {
-        display: inline-block;
-        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 25px;
-        margin: 5px;
-        font-weight: bold;
+    
+    .badge-card { 
+        background: white; 
+        padding: 15px; 
+        border-radius: 15px;
+        border: 1px solid #eef2f6; 
+        text-align: center; 
+        height: 180px;
     }
-    .adjustment-notice {
-        background: #fff3cd;
-        border-left: 4px solid #ffc107;
-        padding: 15px;
-        border-radius: 8px;
+    .badge-icon { font-size: 40px; }
+    .locked { filter: grayscale(100%); opacity: 0.3; }
+
+    .intro-banner {
+        background: linear-gradient(90deg, #7F00FF 0%, #E100FF 100%);
+        color: white; 
+        padding: 25px; 
+        border-radius: 20px; 
+        margin-bottom: 30px;
+    }
+    
+    .white-card .stButton {
+        margin-top: auto;
+        flex-shrink: 0;
+    }
+    
+    .onboarding-container {
+        background: white;
+        padding: 40px;
+        border-radius: 20px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        max-width: 700px;
+        margin: 30px auto;
+    }
+    
+    .daily-goal-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+    }
+    
+    .insight-metric {
+        background: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    
+    .login-container {
+        background: white;
+        padding: 50px;
+        border-radius: 25px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        max-width: 500px;
+        margin: 80px auto;
+        text-align: center;
+    }
+    
+    .feature-box {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 12px;
         margin: 15px 0;
+        border-left: 4px solid #7F00FF;
+    }
+    
+    .showcase-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 25px;
+        border-radius: 15px;
+        margin: 20px 0;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Session state initialization
-if "authenticated" not in st.session_state: st.session_state.authenticated = False
-if "onboarded" not in st.session_state: st.session_state.onboarded = False
-if "user_id" not in st.session_state: st.session_state.user_id = None
-if "username" not in st.session_state: st.session_state.username = None
-if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
-if "active_focus_session" not in st.session_state: st.session_state.active_focus_session = None
-if "task_start_times" not in st.session_state: st.session_state.task_start_times = {}
-if "solution_viewed" not in st.session_state: st.session_state.solution_viewed = set()
-
-# AI functions
+# --- 3. AI Core
 def get_ai_client():
     if not API_KEY:
         st.error("Missing API Key!")
@@ -1088,511 +481,781 @@ def get_initial_plan(subject, topic, context="", user_context=""):
     res = get_ai_response(prompt, is_json=True)
     return json.loads(res) if res else None
 
-def get_new_task_json(subject, topic, diff, user_context="", failed_tasks_context=""):
-    prompt = f"""Create one new {diff} study task for {subject}: {topic}. 
-    {f'User context: {user_context}' if user_context else ''}
-    {f'Avoid similar to: {failed_tasks_context}' if failed_tasks_context else ''}
-    Include a brief solution. Return ONLY JSON: {{'text': '...', 'solution': '...'}}"""
+def get_new_task_json(subject, topic, diff, user_context=""):
+    prompt = f"Create one new {diff} study task for {subject}: {topic}. {f'User context: {user_context}' if user_context else ''} Include a brief solution. Return ONLY JSON: {{'text': '...', 'solution': '...'}}"
     res = get_ai_response(prompt, is_json=True)
     return json.loads(res) if res else {"text": "Review materials", "solution": "No solution available."}
 
-# --- 4. UI COMPONENTS ---
+# --- 4. Logic & State ---
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+if "onboarded" not in st.session_state: st.session_state.onboarded = False
+if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
+if "user_details" not in st.session_state: st.session_state.user_details = {}
+if "user_name" not in st.session_state: st.session_state.user_name = None
+if "user_db_data" not in st.session_state: st.session_state.user_db_data = None
 
+BRAIN_LEVELS = [
+    (0, "🧟 Brain Rot", "Time to study!"),
+    (300, "🧠 Brain Builder", "Foundation set."),
+    (800, "🔥 Brain Heater", "Getting warm!"),
+    (1500, "⚡ High Voltage", "Sparking intelligence!"),
+    (2500, "🌌 GALAXY BRAIN", "Universal Wisdom.")
+]
+
+ACHIEVEMENTS = [
+    {"id": "first", "name": "The Initiate", "emoji": "🥉", "req": 100, "desc": "100 XP Earned"},
+    {"id": "pro", "name": "Scholar", "emoji": "🥈", "req": 10, "type": "tasks", "desc": "10 Quests Done"},
+    {"id": "master", "name": "Sage", "emoji": "🥇", "req": 1500, "desc": "1,500 XP Earned"},
+    {"id": "god", "name": "Galaxy Brain", "emoji": "🌌", "req": 5000, "desc": "5,000 XP Earned"}
+]
+
+def get_brain_status(xp):
+    current = BRAIN_LEVELS[0]
+    next_limit = BRAIN_LEVELS[1][0]
+    for i, level in enumerate(BRAIN_LEVELS):
+        if xp >= level[0]:
+            current = level
+            next_limit = BRAIN_LEVELS[i+1][0] if i+1 < len(BRAIN_LEVELS) else xp * 1.5
+    return current, next_limit
+
+def load_user_data():
+    """Load user data from database into session state"""
+    if st.session_state.user_name:
+        user = get_or_create_user(st.session_state.user_name)
+        if user:
+            st.session_state.user_db_data = {
+                'id': user[0],
+                'username': user[1],
+                'total_xp': user[2],
+                'tasks_completed': user[3],
+                'daily_goal': user[4],
+                'streak_days': user[5],
+                'last_activity_date': user[6],
+                'subjects_interested': user[8],
+                'learning_style': user[9],
+                'weekly_commitment': user[10]
+            }
+
+# --- 5. Login Page ---
 def render_login():
-    """Login/Signup page"""
     st.markdown("""
-        <div style="text-align: center; padding: 50px;">
-            <h1 style="font-size: 4em;">🧠</h1>
-            <h1 style="color: #7F00FF;">BrainWash: Data-Driven Learning</h1>
-            <p style="color: #666; font-size: 1.2em;">Your adaptive learning companion</p>
+        <div class="login-container">
+            <div class="brain-avatar">🧠</div>
+            <h1 style="color: #7F00FF; margin-bottom: 10px;">BrainWash: Arcade</h1>
+            <p style="color: #666; margin-bottom: 40px;">Gamify Your Learning Journey</p>
         </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["🔑 Returning User", "✨ New User"])
+    tab1, tab2 = st.tabs(["🔑 Been Here?", "✨ New Here?"])
     
     with tab1:
-        with st.form("login"):
-            username = st.text_input("Username")
-            if st.form_submit_button("Login", type="primary", use_container_width=True):
-                if UserDataManager.user_exists(username):
-                    user = UserDataManager.get_user(username)
-                    st.session_state.user_id = user[0]
-                    st.session_state.username = username
+        st.markdown("### Welcome Back!")
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter your username")
+            login_btn = st.form_submit_button("🚀 Enter Arcade", use_container_width=True, type="primary")
+            
+            if login_btn:
+                if not username:
+                    st.error("Please enter your username!")
+                elif user_exists(username):
+                    st.session_state.user_name = username
                     st.session_state.authenticated = True
                     st.session_state.onboarded = True
-                    st.success(f"Welcome back, {username}!")
+                    load_user_data()
+                    st.success(f"Welcome back, {username}! 🎮")
                     time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("User not found!")
+                    st.error("Username not found! Please create a new account in the 'New Here?' tab.")
     
     with tab2:
-        with st.form("signup"):
-            new_username = st.text_input("Choose Username")
-            if st.form_submit_button("Create Account", type="primary", use_container_width=True):
-                if not UserDataManager.user_exists(new_username):
-                    st.session_state.username = new_username
+        st.markdown("### Create Your Account")
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose a Username", placeholder="brain_master_2024")
+            signup_btn = st.form_submit_button("🎯 Create Account", use_container_width=True, type="primary")
+            
+            if signup_btn:
+                if not new_username:
+                    st.error("Please choose a username!")
+                elif user_exists(new_username):
+                    st.error("Username already exists! Please choose a different one or login.")
+                else:
+                    st.session_state.user_name = new_username
                     st.session_state.authenticated = True
                     st.session_state.onboarded = False
-                    st.success("Account created! Let's personalize your experience.")
+                    st.success(f"Account created! Let's set up your profile, {new_username}! 🎉")
                     time.sleep(0.5)
                     st.rerun()
-                else:
-                    st.error("Username taken!")
 
+# --- 6. Enhanced Onboarding ---
 def render_onboarding():
-    """Enhanced onboarding for data collection"""
-    st.title("🎯 Welcome to Data-Driven Learning")
-    
     st.markdown("""
-    BrainWash uses **adaptive algorithms** to personalize your learning experience.
-    We'll use your answers to:
-    - Set intelligent initial goals
-    - Adjust difficulty dynamically
-    - Generate personalized insights
-    - Track your learning efficiency
-    """)
+        <div class="onboarding-container">
+            <h1 style="text-align: center; color: #7F00FF; margin-bottom: 10px;">
+                🎮 Welcome to BrainWash Arcade!
+            </h1>
+            <p style="text-align: center; color: #666; font-size: 1.1em; margin-bottom: 30px;">
+                Transform boring study materials into epic quests
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    with st.form("onboarding"):
-        st.subheader("📚 Learning Profile")
+    # System Showcase
+    with st.expander("🌟 What Makes BrainWash Special?", expanded=True):
+        st.markdown("""
+            <div class="showcase-section">
+                <h3>🎯 Gamification That Actually Works</h3>
+                <p>We've turned studying into an RPG-style adventure. Every topic becomes a mission, every completed task earns XP, and your progress unlocks achievements and brain levels!</p>
+            </div>
+        """, unsafe_allow_html=True)
         
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+                <div class="feature-box">
+                    <h4>🤖 AI-Powered Personalization</h4>
+                    <p>Our Gemini AI adapts tasks to YOUR learning style, generating custom challenges based on your preferences and materials.</p>
+                </div>
+                
+                <div class="feature-box">
+                    <h4>📊 Smart Analytics</h4>
+                    <p>Track your learning patterns with detailed insights: daily progress, subject distribution, difficulty trends, and more!</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+                <div class="feature-box">
+                    <h4>🎯 Daily Goals & Streaks</h4>
+                    <p>Set personalized daily targets and build consistency with streak tracking. Stay motivated every single day!</p>
+                </div>
+                
+                <div class="feature-box">
+                    <h4>📈 Progress Persistence</h4>
+                    <p>All your data is saved locally. Your XP, achievements, and task history stay with you forever.</p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        st.info("💡 **Perfect for**: Students, Lifelong Learners, Professionals upskilling, Anyone who wants to make studying fun!")
+    
+    # How It Works
+    with st.expander("📖 How BrainWash Works"):
+        st.markdown("""
+        ### Your Journey in 4 Simple Steps:
+        
+        **1. 📚 Choose Your Subject**
+        - Enter any topic manually OR upload PDFs/study materials
+        - Our AI scans and understands your content
+        
+        **2. 🎮 Get Your Quests**
+        - Receive 5 personalized tasks (1 Hard, 2 Medium, 2 Easy)
+        - Each task has solutions you can reveal when stuck
+        
+        **3. ✅ Complete & Earn**
+        - Mark tasks as done to earn XP (Easy: 50, Medium: 150, Hard: 300)
+        - Don't like a task? Reroll it for 20 XP!
+        
+        **4. 📊 Track & Improve**
+        - Watch your brain level evolve from 🧟 Brain Rot to 🌌 Galaxy Brain
+        - Analyze your learning patterns in the Insights dashboard
+        - Export your progress to Google Sheets anytime!
+        """)
+        
+        st.success("🏆 **Unlock Achievements**: Earn badges as you hit XP milestones and task counts!")
+    
+    # The Science
+    with st.expander("🧪 The Science Behind BrainWash"):
+        st.markdown("""
+        ### Why Gamification Works for Learning:
+        
+        **🎯 Immediate Feedback Loop**
+        - Instant XP rewards create dopamine hits that reinforce learning behavior
+        - Studies show gamified learning increases engagement by 60%
+        
+        **🔥 Consistency Through Streaks**
+        - Daily goals activate the "commitment and consistency" psychological principle
+        - Streaks leverage loss aversion - you don't want to break the chain!
+        
+        **📈 Mastery Progression**
+        - Clear brain levels provide tangible evidence of improvement
+        - Graduated difficulty (Easy → Medium → Hard) matches Vygotsky's Zone of Proximal Development
+        
+        **🤝 Social Proof Elements**
+        - Achievement badges tap into our need for status and recognition
+        - (Future: Leaderboards will add healthy competition!)
+        
+        **🎨 Personalization = Retention**
+        - AI-adapted tasks align with your learning style and pace
+        - Relevant content increases retention rates by up to 40%
+        """)
+    
+    st.divider()
+    
+    # Setup Form
+    st.markdown("### 🎯 Let's Personalize Your Experience")
+    
+    with st.form("onboarding_form"):
         col1, col2 = st.columns(2)
         
         with col1:
             subjects = st.text_area(
-                "What are you studying?",
-                placeholder="Math, Physics, Programming",
-                help="We'll personalize task generation"
-            )
-            
-            skill_level = st.select_slider(
-                "Self-assessed skill level",
-                options=['Beginner', 'Intermediate', 'Advanced', 'Expert'],
-                value='Intermediate'
+                "📚 What subjects are you studying?",
+                placeholder="e.g., Mathematics, Physics, Programming, History",
+                help="Separate multiple subjects with commas",
+                height=100
             )
             
             learning_style = st.selectbox(
-                "Preferred learning style",
-                ['Visual', 'Auditory', 'Reading/Writing', 'Kinesthetic']
+                "🎨 Your learning style?",
+                ["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                 "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"],
+                help="We'll tailor tasks to match your style"
             )
         
         with col2:
-            weekly_hours = st.slider(
-                "Weekly hours available",
-                1, 40, 10,
-                help="Used to calculate realistic goals"
+            weekly_commitment = st.slider(
+                "⏰ Weekly study hours?",
+                min_value=1, max_value=40, value=10,
+                help="This helps us understand your availability"
             )
             
-            motivation = st.select_slider(
-                "Current motivation level",
-                options=['Low', 'Medium', 'High'],
-                value='Medium'
-            )
-            
-            urgency = st.select_slider(
-                "Learning urgency",
-                options=['Relaxed', 'Moderate', 'Urgent'],
-                value='Moderate'
+            daily_goal = st.slider(
+                "🎯 Daily task goal?",
+                min_value=1, max_value=20, value=3,
+                help="Start small! You can adjust this later"
             )
         
-        st.divider()
-        st.subheader("🎯 Initial Goals")
-        st.info("💡 Don't worry - these will adapt based on your performance!")
+        st.markdown("---")
         
-        submitted = st.form_submit_button("🚀 Start Learning", type="primary", use_container_width=True)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            submitted = st.form_submit_button(
+                "🚀 Launch My Learning Journey!", 
+                use_container_width=True, 
+                type="primary"
+            )
         
         if submitted:
             if not subjects:
                 st.error("Please enter at least one subject!")
             else:
+                # Create user in database
                 onboarding_data = {
                     'subjects': subjects,
-                    'skill_level': skill_level,
-                    'learning_style': learning_style,
-                    'weekly_hours': weekly_hours,
-                    'motivation_level': motivation,
-                    'urgency': urgency
+                    'style': learning_style,
+                    'commitment': weekly_commitment,
+                    'daily_goal': daily_goal
                 }
                 
-                user_id = UserDataManager.create_user(st.session_state.username, onboarding_data)
-                st.session_state.user_id = user_id
-                st.session_state.onboarded = True
+                user = get_or_create_user(st.session_state.user_name, onboarding_data)
                 
-                st.balloons()
-                st.success("✅ Profile created! Your adaptive learning journey begins now.")
-                time.sleep(1)
-                st.rerun()
+                if user:
+                    st.session_state.onboarded = True
+                    load_user_data()
+                    st.balloons()
+                    st.success(f"🎉 All set, {st.session_state.user_name}! Let's start learning!")
+                    time.sleep(1.5)
+                    st.rerun()
 
-def render_arcade():
-    """Main learning interface"""
-    st.title("🎮 Learning Arcade")
+# --- 7. Daily Goal Widget ---
+def render_daily_goal():
+    if not st.session_state.user_db_data:
+        return
     
-    # Check for goal adjustments
-    adjustment = GoalManager.finalize_period_goals(st.session_state.user_id)
-    if adjustment and adjustment['adjustment_type'] != 'maintain':
-        st.markdown(f"""
-            <div class="adjustment-notice">
-                <strong>🎯 Goal Adjusted!</strong><br>
-                {adjustment['reason']}<br>
-                New daily target: <strong>{adjustment['new_target']} tasks</strong>
-            </div>
-        """, unsafe_allow_html=True)
+    daily_goal = st.session_state.user_db_data['daily_goal']
+    today_count = get_today_progress(st.session_state.user_name)
+    progress_pct = min(today_count / daily_goal, 1.0)
     
-    # Display active goals
-    goals = GoalManager.get_active_goals(st.session_state.user_id)
+    st.markdown(f"""
+        <div class="daily-goal-card">
+            <h3 style="margin: 0 0 10px 0;">🎯 Daily Goal</h3>
+            <h1 style="margin: 0;">{today_count} / {daily_goal}</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">tasks completed today</p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    if goals:
-        st.subheader("🎯 Active Goals")
-        cols = st.columns(len(goals))
-        
-        for i, goal in enumerate(goals):
-            with cols[i]:
-                goal_type = goal[2]
-                target = goal[3]
-                actual = goal[7]
-                progress = min(actual / target, 1.0) if target > 0 else 0
-                
-                st.metric(
-                    f"{goal_type.title()} Goal",
-                    f"{actual}/{target} tasks",
-                    f"{progress:.0%} complete"
+    st.progress(progress_pct)
+    
+    if today_count >= daily_goal:
+        st.success("🎉 Daily goal achieved! Keep going!")
+    elif today_count >= daily_goal * 0.5:
+        st.info(f"💪 Halfway there! {daily_goal - today_count} more to go!")
+
+# --- 8. Insights Dashboard with Export ---
+def render_insights():
+    st.title("📊 Learning Insights")
+    
+    if not st.session_state.user_db_data:
+        st.warning("No data available yet. Complete some tasks to see your insights!")
+        return
+    
+    analytics = get_user_analytics(st.session_state.user_name)
+    
+    if not analytics:
+        st.warning("No analytics data available yet.")
+        return
+    
+    # Export Button
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col3:
+        if st.button("📤 Export to CSV", use_container_width=True):
+            if analytics['all_tasks']:
+                df = pd.DataFrame(
+                    analytics['all_tasks'],
+                    columns=['Completed At', 'Subject', 'Topic', 'Task', 'Difficulty', 'XP Earned']
                 )
-                st.progress(progress)
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download CSV",
+                    data=csv,
+                    file_name=f"brainwash_data_{st.session_state.user_name}_{date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.success("✅ CSV ready for download!")
+            else:
+                st.info("No data to export yet!")
+    
+    with col2:
+        if st.button("📊 View Google Sheets Format", use_container_width=True):
+            if analytics['all_tasks']:
+                df = pd.DataFrame(
+                    analytics['all_tasks'],
+                    columns=['Completed At', 'Subject', 'Topic', 'Task', 'Difficulty', 'XP Earned']
+                )
+                st.dataframe(df, use_container_width=True)
+                st.info("💡 Copy this table and paste into Google Sheets!")
+            else:
+                st.info("No data to export yet!")
     
     st.divider()
     
-    # Task generation
-    if not st.session_state.current_tasks:
-        tab1, tab2 = st.tabs(["📝 Manual Entry", "📄 PDF Upload"])
-        
-        with tab1:
-            with st.form("manual_entry"):
-                subject = st.text_input("Subject")
-                topic = st.text_input("Topic")
-                
-                if st.form_submit_button("Generate Tasks"):
-                    if subject and topic:
-                        with st.spinner("Generating personalized tasks..."):
-                            plan = get_initial_plan(subject, topic)
-                            if plan:
-                                # Create tasks in database
-                                for task_data in plan['tasks']:
-                                    task_id = TaskManager.create_task(
-                                        st.session_state.user_id,
-                                        task_data,
-                                        subject,
-                                        topic
-                                    )
-                                    task_data['id'] = task_id
-                                    task_data['start_time'] = None
-                                
-                                st.session_state.current_tasks = plan['tasks']
-                                st.success("Tasks generated!")
-                                st.rerun()
-        
-        with tab2:
-            with st.form("pdf_upload"):
-                subject_pdf = st.text_input("Subject")
-                uploaded_file = st.file_uploader("Upload PDF", type=['pdf'])
-                
-                if st.form_submit_button("Analyze & Generate"):
-                    if uploaded_file and subject_pdf:
-                        reader = pypdf.PdfReader(uploaded_file)
-                        text = "".join([page.extract_text() for page in reader.pages])
-                        
-                        with st.spinner("Analyzing document..."):
-                            plan = get_initial_plan(subject_pdf, uploaded_file.name, context=text)
-                            if plan:
-                                for task_data in plan['tasks']:
-                                    task_id = TaskManager.create_task(
-                                        st.session_state.user_id,
-                                        task_data,
-                                        subject_pdf,
-                                        uploaded_file.name
-                                    )
-                                    task_data['id'] = task_id
-                                    task_data['start_time'] = None
-                                
-                                st.session_state.current_tasks = plan['tasks']
-                                st.success("Tasks generated from PDF!")
-                                st.rerun()
-    
-    else:
-        # Display and manage tasks
-        st.subheader("📋 Your Tasks")
-        
-        for i, task in enumerate(st.session_state.current_tasks):
-            task_id = task.get('id')
-            difficulty = task['difficulty']
-            xp = task['xp']
-            
-            st.markdown(f"""
-                <div class="task-card diff-{difficulty}">
-                    <strong>{difficulty}</strong> • {xp} XP<br>
-                    {html.escape(task['text'])}
-                </div>
-            """, unsafe_allow_html=True)
-            
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                if st.button("✅ Complete", key=f"complete_{i}", use_container_width=True):
-                    # Calculate time spent
-                    time_spent = 120  # Default 2 minutes
-                    if task.get('start_time'):
-                        time_spent = int((datetime.now() - task['start_time']).total_seconds())
-                    
-                    # Get user multiplier
-                    user = UserDataManager.get_user(st.session_state.username)
-                    multiplier = user[15] if user else 1.0
-                    
-                    # Complete task
-                    xp_earned = int(xp * multiplier)
-                    solution_viewed = i in st.session_state.solution_viewed
-                    
-                    TaskManager.complete_task(
-                        task_id, st.session_state.user_id,
-                        xp_earned, multiplier, time_spent, solution_viewed
-                    )
-                    
-                    TaskManager.transition_task_state(task_id, 'completed', 'User completed')
-                    
-                    # Update user stats and goals
-                    UserDataManager.update_xp_and_streak(st.session_state.username, xp_earned, multiplier)
-                    GoalManager.update_goal_progress(st.session_state.user_id, tasks_increment=1, xp_increment=xp_earned)
-                    
-                    # Check achievements
-                    new_achievements = AchievementSystem.check_and_award_achievements(st.session_state.user_id)
-                    if new_achievements:
-                        for ach in new_achievements:
-                            st.success(f"🏆 Achievement Unlocked: {ach['name']} - {ach['description']}")
-                    
-                    # Generate new task
-                    st.session_state.current_tasks.pop(i)
-                    st.rerun()
-            
-            with col2:
-                if st.button("⏭️ Skip", key=f"skip_{i}", use_container_width=True):
-                    TaskManager.transition_task_state(task_id, 'skipped', 'User skipped')
-                    st.session_state.current_tasks.pop(i)
-                    st.rerun()
-            
-            with col3:
-                if st.button("👁️", key=f"solution_{i}", use_container_width=True, help="View solution"):
-                    st.session_state.solution_viewed.add(i)
-                    TaskManager.transition_task_state(task_id, 'in_progress', 'Solution viewed')
-            
-            if i in st.session_state.solution_viewed:
-                st.info(f"💡 Solution: {task.get('solution', 'No solution available')}")
-            
-            st.divider()
-        
-        if st.button("🔄 Reset Session"):
-            st.session_state.current_tasks = []
-            st.rerun()
-
-def render_insights():
-    """Advanced insights dashboard"""
-    st.title("📊 Learning Insights")
-    
-    # Calculate latest KPIs
-    kpis = AnalyticsEngine.calculate_kpis(st.session_state.user_id)
-    
-    # KPI Display
-    st.subheader("🎯 Key Performance Indicators")
-    
+    # Key Metrics
+    st.subheader("📈 Overview")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown(f"""
-            <div class="kpi-card">
-                <h3 style="color: #7F00FF; margin: 0;">{kpis['learning_efficiency']:.2f}</h3>
-                <p style="color: #666; margin: 5px 0 0 0;">Learning Efficiency<br><small>XP per minute</small></p>
+            <div class="insight-metric">
+                <h2 style="color: #7F00FF; margin: 0;">{st.session_state.user_db_data['total_xp']}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">Total XP</p>
             </div>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown(f"""
-            <div class="kpi-card">
-                <h3 style="color: #ff4b4b; margin: 0;">{kpis['completion_rate']:.0%}</h3>
-                <p style="color: #666; margin: 5px 0 0 0;">Completion Rate<br><small>vs attempts</small></p>
+            <div class="insight-metric">
+                <h2 style="color: #ff4b4b; margin: 0;">{st.session_state.user_db_data['tasks_completed']}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">Tasks Done</p>
             </div>
         """, unsafe_allow_html=True)
     
     with col3:
         st.markdown(f"""
-            <div class="kpi-card">
-                <h3 style="color: #ffa726; margin: 0;">{kpis['avg_task_time']/60:.1f}</h3>
-                <p style="color: #666; margin: 5px 0 0 0;">Avg Task Time<br><small>minutes</small></p>
+            <div class="insight-metric">
+                <h2 style="color: #ffa726; margin: 0;">{st.session_state.user_db_data['streak_days']}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">Day Streak 🔥</p>
             </div>
         """, unsafe_allow_html=True)
     
     with col4:
+        avg_xp = st.session_state.user_db_data['total_xp'] // max(st.session_state.user_db_data['tasks_completed'], 1)
         st.markdown(f"""
-            <div class="kpi-card">
-                <h3 style="color: #66bb6a; margin: 0;">{kpis['consistency']:.0%}</h3>
-                <p style="color: #666; margin: 5px 0 0 0;">Weekly Consistency<br><small>active days</small></p>
+            <div class="insight-metric">
+                <h2 style="color: #66bb6a; margin: 0;">{avg_xp}</h2>
+                <p style="margin: 5px 0 0 0; color: #666;">Avg XP/Task</p>
             </div>
         """, unsafe_allow_html=True)
     
     st.divider()
     
-    # Behavioral Insights
-    st.subheader("🧠 Behavioral Insights")
+    # Activity Charts
+    col1, col2 = st.columns(2)
     
-    insights = AnalyticsEngine.generate_behavioral_insights(st.session_state.user_id)
-    
-    if insights:
-        for insight in insights:
-            st.markdown(f"""
-                <div class="insight-card">
-                    <strong>{insight['text']}</strong><br>
-                    <small>💡 Suggested action: {insight['action']}</small>
-                </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("Complete more tasks to unlock personalized insights!")
-    
-    st.divider()
-    
-    # Goal Performance History
-    st.subheader("📈 Goal Performance Trend")
-    
-    conn = sqlite3.connect(DB_PATH)
-    query = """
-        SELECT period_start, target_tasks, actual_tasks, completion_rate, status
-        FROM Goal
-        WHERE user_id = ? AND goal_type = 'daily'
-        ORDER BY period_start DESC
-        LIMIT 14
-    """
-    df_goals = pd.read_sql_query(query, conn, params=(st.session_state.user_id,))
-    conn.close()
-    
-    if not df_goals.empty:
-        df_goals = df_goals.iloc[::-1]  # Reverse for chronological order
-        st.line_chart(df_goals.set_index('period_start')[['target_tasks', 'actual_tasks']])
-    else:
-        st.info("Goal history will appear here as you progress.")
-    
-    st.divider()
-    
-    # Export functionality
-    st.subheader("📤 Export Data")
-    
-    if st.button("Download Complete Learning History (CSV)"):
-        conn = sqlite3.connect(DB_PATH)
-        query = """
-            SELECT 
-                tc.completed_at,
-                tc.subject,
-                tc.topic,
-                tc.task_text,
-                tc.difficulty,
-                tc.xp_earned,
-                tc.time_to_complete_seconds,
-                tc.solution_viewed
-            FROM TaskCompletion tc
-            WHERE tc.user_id = ?
-            ORDER BY tc.completed_at DESC
-        """
-        df = pd.read_sql_query(query, conn, params=(st.session_state.user_id,))
-        conn.close()
-        
-        if not df.empty:
-            csv = df.to_csv(index=False)
-            st.download_button(
-                "⬇️ Download CSV",
-                csv,
-                f"brainwash_data_{st.session_state.username}.csv",
-                "text/csv"
-            )
+    with col1:
+        st.subheader("📅 7-Day Activity")
+        if analytics['daily_tasks']:
+            df_daily = pd.DataFrame(analytics['daily_tasks'], columns=['Date', 'Tasks'])
+            st.bar_chart(df_daily.set_index('Date'))
         else:
-            st.info("No data yet!")
-
-def render_profile():
-    """User profile with achievements"""
-    st.title("👤 Profile")
+            st.info("No activity data yet for the past 7 days.")
     
-    user = UserDataManager.get_user(st.session_state.username)
-    
-    if user:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📊 Statistics")
-            st.metric("Total XP", user[2])
-            st.metric("Tasks Completed", user[3])
-            st.metric("Current Streak", f"{user[4]} days 🔥")
-            st.metric("Longest Streak", f"{user[5]} days")
-            st.metric("XP Multiplier", f"{user[15]:.2f}x")
-        
-        with col2:
-            st.subheader("🎯 Learning Profile")
-            st.write(f"**Subjects:** {user[8]}")
-            st.write(f"**Learning Style:** {user[9]}")
-            st.write(f"**Weekly Hours:** {user[10]}")
-            st.write(f"**Motivation:** {user[11]}")
-            st.write(f"**Skill Level:** {user[12]}")
+    with col2:
+        st.subheader("⚡ XP Earned (7 Days)")
+        if analytics['daily_xp']:
+            df_xp = pd.DataFrame(analytics['daily_xp'], columns=['Date', 'XP'])
+            st.area_chart(df_xp.set_index('Date'), color="#7F00FF")
+        else:
+            st.info("No XP data yet for the past 7 days.")
     
     st.divider()
     
-    # Achievements
-    st.subheader("🏆 Achievements")
+    # Difficulty Breakdown
+    col1, col2 = st.columns(2)
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT achievement_name, earned_at, reward_type, reward_value
-        FROM Achievement WHERE user_id = ?
-        ORDER BY earned_at DESC
-    """, (st.session_state.user_id,))
+    with col1:
+        st.subheader("🎯 Tasks by Difficulty")
+        if analytics['difficulty_breakdown']:
+            df_diff = pd.DataFrame(analytics['difficulty_breakdown'], columns=['Difficulty', 'Count'])
+            st.bar_chart(df_diff.set_index('Difficulty'), color="#E100FF")
+        else:
+            st.info("No difficulty data available.")
     
-    achievements = cursor.fetchall()
-    conn.close()
+    with col2:
+        st.subheader("📚 Top Subjects")
+        if analytics['subject_stats']:
+            for subject, count, xp in analytics['subject_stats']:
+                st.markdown(f"""
+                    <div class="stat-box">
+                        <strong>{subject}</strong><br>
+                        <small>{count} tasks • {xp} XP earned</small>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No subject data available.")
     
-    if achievements:
-        for ach in achievements:
+    st.divider()
+    
+    # Recent Activity
+    st.subheader("🕐 Recent Activity")
+    if analytics['recent_tasks']:
+        for task_text, difficulty, xp, subject, completed_at in analytics['recent_tasks'][:5]:
+            completed_date = datetime.fromisoformat(completed_at).strftime("%b %d, %I:%M %p")
+            color = {"Hard": "#ff4b4b", "Medium": "#ffa726", "Easy": "#66bb6a"}.get(difficulty, "#999")
             st.markdown(f"""
-                <div class="achievement-badge">
-                    🏆 {ach[0]} - Earned {ach[1][:10]}
-                    <br><small>Reward: {ach[2]}</small>
+                <div class="task-card diff-{difficulty}">
+                    <span style="background: {color}; color: white; padding: 3px 8px; border-radius: 5px; font-size: 0.8em;">
+                        {difficulty} • +{xp} XP
+                    </span>
+                    <div style="margin-top: 8px;"><strong>{subject}</strong></div>
+                    <div style="margin-top: 5px; color: #666;">{html.escape(task_text)}</div>
+                    <small style="color: #999;">{completed_date}</small>
                 </div>
             """, unsafe_allow_html=True)
     else:
-        st.info("Complete tasks to earn achievements!")
+        st.info("No recent tasks to display.")
 
-# --- 5. MAIN APP ---
+# --- 9. Profile with Editable Preferences ---
+def render_profile():
+    st.title("👤 Brain Profile")
+    
+    if not st.session_state.user_db_data:
+        st.error("User data not loaded!")
+        return
+    
+    user_data = st.session_state.user_db_data
+    
+    # Editable Learning Preferences
+    with st.expander("📝 Edit Learning Preferences", expanded=False):
+        with st.form("edit_profile"):
+            new_subjects = st.text_area(
+                "Subjects", 
+                value=user_data['subjects_interested'],
+                help="Separate with commas"
+            )
+            new_style = st.selectbox(
+                "Learning Style",
+                ["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                 "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"],
+                index=["Visual (diagrams, videos)", "Auditory (lectures, discussions)", 
+                       "Reading/Writing (notes, articles)", "Kinesthetic (hands-on practice)"].index(user_data['learning_style'])
+            )
+            new_commitment = st.slider(
+                "Weekly Commitment (hours)",
+                min_value=1, max_value=40, 
+                value=user_data['weekly_commitment']
+            )
+            new_goal = st.slider(
+                "Daily Goal (tasks)",
+                min_value=1, max_value=20, 
+                value=user_data['daily_goal']
+            )
+            
+            if st.form_submit_button("💾 Save Changes", type="primary"):
+                update_user_profile(
+                    st.session_state.user_name,
+                    new_subjects,
+                    new_style,
+                    new_commitment,
+                    new_goal
+                )
+                load_user_data()
+                st.success("✅ Profile updated!")
+                st.rerun()
 
+    (lvl_xp, lvl_title, lvl_desc), next_limit = get_brain_status(user_data['total_xp'])
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        emoji = lvl_title.split()[0]
+        st.markdown(f"""
+            <div class="white-card">
+                <div class="brain-avatar">{emoji}</div>
+                <h2>{st.session_state.user_name}</h2>
+                <h4 style="color: #7F00FF;">{lvl_title}</h4>
+                <p>{lvl_desc}</p>
+                <div style="background:#eee; padding:5px; border-radius:10px;">Level {int(user_data['total_xp'] / 500) + 1}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(f"""
+            <div class="white-card">
+                <h3 style="margin-bottom: 10px;">📊 Statistics</h3>
+                <div class="scrollable-content">
+                    <div class="stat-box"><strong>Total XP:</strong> {user_data['total_xp']}</div>
+                    <div class="stat-box"><strong>Tasks Done:</strong> {user_data['tasks_completed']}</div>
+                    <div class="stat-box"><strong>Day Streak:</strong> 🔥 {user_data['streak_days']} Days</div>
+                    <div class="stat-box"><strong>Daily Goal:</strong> {user_data['daily_goal']} tasks/day</div>
+                    <div class="stat-box"><strong>Learning Style:</strong> {user_data['learning_style'].split('(')[0]}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+            <div class="white-card">
+                <h3 style="margin-bottom: 10px;">👥 Study Buddies</h3>
+                <div class="scrollable-content">
+                    <div class="friend-row">
+                        <div>
+                            <strong>Sarah_Brains</strong><br><small>Physics</small>
+                        </div>
+                        <span class="status-dot online"></span>
+                    </div>
+                    <div class="friend-row">
+                        <div>
+                            <strong>Mike_The_Wiz</strong><br><small>Algebra</small>
+                        </div>
+                        <span class="status-dot online"></span>
+                    </div>
+                    <div class="friend-row">
+                        <div>
+                            <strong>Lazy_Dave</strong><br><small>Last seen 2d ago</small>
+                        </div>
+                        <span class="status-dot offline"></span>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
+                    <button style="
+                        width: 100%;
+                        padding: 10px;
+                        background: white;
+                        border: 2px solid #7F00FF;
+                        color: #7F00FF;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: all 0.3s;
+                    " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
+                       onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
+                        ➕ Add Friend
+                    </button>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+    
+    # Achievements Section
+    st.subheader("🏆 Achievements")
+    badge_cols = st.columns(len(ACHIEVEMENTS))
+    for i, ach in enumerate(ACHIEVEMENTS):
+        is_locked = True
+        if ach.get("type") == "tasks":
+            if user_data['tasks_completed'] >= ach["req"]: 
+                is_locked = False
+        else:
+            if user_data['total_xp'] >= ach["req"]: 
+                is_locked = False
+        
+        with badge_cols[i]:
+            status = "locked" if is_locked else ""
+            st.markdown(f"""
+                <div class="badge-card {status}">
+                    <div class="badge-icon">{ach["emoji"]}</div>
+                    <strong>{ach["name"]}</strong><br>
+                    <small>{ach["desc"]}</small>
+                </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+    
+    # Focus Mode Timer
+    st.subheader("⏲️ Focus Mode")
+    with st.expander("Start Deep Work Session"):
+        focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
+        c1, c2 = st.columns(2)
+        if c1.button("🚀 Start Timer", use_container_width=True, type="primary"):
+            p = st.empty()
+            stop_button_placeholder = c2.empty()
+            for s in range(focus_mins * 60, 0, -1):
+                if stop_button_placeholder.button("🛑 Stop & Reset", key=f"stop_{s}", use_container_width=True):
+                    st.rerun()
+                m, sc = divmod(s, 60)
+                p.metric("Time Remaining", f"{m:02d}:{sc:02d}")
+                time.sleep(1)
+            st.balloons()
+            update_user_stats(st.session_state.user_name, xp_gained=50)
+            load_user_data()
+            st.rerun()
+    
+# --- 10. Arcade ---
+def render_arcade():
+    if not st.session_state.user_db_data:
+        st.error("User data not loaded!")
+        return
+    
+    user_data = st.session_state.user_db_data
+    
+    # Intro Banner
+    st.markdown("""
+        <div class="intro-banner">
+            <h2>Welcome to BrainWash Arcade 🎮</h2>
+            <p>Turn study materials into active quests. Earn XP, unlock ranks, and master subjects!</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Progress Bar Header
+    (lvl_xp, lvl_title, _), next_limit = get_brain_status(user_data['total_xp'])
+    prog = min((user_data['total_xp'] - lvl_xp) / (next_limit - lvl_xp), 1.0)
+    st.write(f"**Rank:** {lvl_title} ({user_data['total_xp']} XP)")
+    st.progress(prog)
+
+    if not st.session_state.user_details:
+        # User context for AI
+        user_context = f"Subjects: {user_data['subjects_interested']}, Learning style: {user_data['learning_style']}"
+        
+        t1, t2 = st.tabs(["🔍 Subject Search", "📄 PDF Scan"])
+        with t1:
+            with st.form("manual"):
+                sub = st.text_input("Subject", "Math")
+                top = st.text_input("Topic", "Matrices")
+                if st.form_submit_button("Start Mission"):
+                    plan = get_initial_plan(sub, top, user_context=user_context)
+                    if plan:
+                        st.session_state.current_tasks = plan['tasks']
+                        st.session_state.user_details = {"sub": sub, "top": top}
+                        st.rerun()
+        with t2:
+            with st.form("pdf"):
+                sub_p = st.text_input("Subject")
+                f = st.file_uploader("Upload PDF", type="pdf")
+                if st.form_submit_button("Analyze & Play"):
+                    if f:
+                        reader = pypdf.PdfReader(f)
+                        txt = "".join([p.extract_text() for p in reader.pages])
+                        plan = get_initial_plan(sub_p, f.name, txt, user_context=user_context)
+                        if plan:
+                            st.session_state.current_tasks = plan['tasks']
+                            st.session_state.user_details = {"sub": sub_p, "top": f.name, "pdf_text": txt}
+                            st.rerun()
+    else:
+        st.caption(f"Mission: {st.session_state.user_details['top']}")
+        user_context = f"Subjects: {user_data['subjects_interested']}, Learning style: {user_data['learning_style']}"
+        
+        for i, task in enumerate(st.session_state.current_tasks):
+            d = task['difficulty']
+            xp = task['xp']
+            st.markdown(f"""
+                <div class="task-card diff-{d}">
+                    <span class="badge bg-{d}">{d} | +{xp} XP</span>
+                    <div style="margin-top:10px;">{html.escape(task['text'])}</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Done", key=f"d{i}", use_container_width=True, type="primary"):
+                    # Update database
+                    update_user_stats(st.session_state.user_name, xp_gained=xp, task_completed=True)
+                    log_task_completion(
+                        st.session_state.user_name,
+                        task['text'],
+                        d,
+                        xp,
+                        st.session_state.user_details['sub'],
+                        st.session_state.user_details['top']
+                    )
+                    load_user_data()
+                    
+                    # Generate new task
+                    with st.spinner("New task..."):
+                        new = get_new_task_json(
+                            st.session_state.user_details['sub'], 
+                            st.session_state.user_details['top'], 
+                            d,
+                            user_context=user_context
+                        )
+                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                    st.rerun()
+            with c2:
+                if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
+                    if user_data['total_xp'] >= 20:
+                        update_user_stats(st.session_state.user_name, xp_gained=-20)
+                        load_user_data()
+                        with st.spinner("Rerolling..."):
+                            new = get_new_task_json(
+                                st.session_state.user_details['sub'], 
+                                st.session_state.user_details['top'], 
+                                d,
+                                user_context=user_context
+                            )
+                            st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                        st.rerun()
+            
+            with st.expander("💡 Show Solution"):
+                st.write(task.get('solution', 'No solution found.'))
+        
+        if st.button("🏳️ Reset Session"):
+            st.session_state.user_details = {}
+            st.rerun()
+
+# --- 11. Main App Logic ---
+
+# Check authentication
 if not st.session_state.authenticated:
     render_login()
 elif not st.session_state.onboarded:
     render_onboarding()
 else:
-    # Sidebar navigation
+    # Load user data if not loaded
+    if not st.session_state.user_db_data:
+        load_user_data()
+    
+    # Sidebar with Progress & Daily Goal
     with st.sidebar:
         st.title("🧠 BrainWash")
-        st.write(f"**{st.session_state.username}**")
+        st.write(f"Hello, **{st.session_state.user_name}**!")
         
-        user = UserDataManager.get_user(st.session_state.username)
-        if user:
-            st.metric("XP", user[2])
-            st.metric("Streak", f"{user[4]} days")
+        if st.session_state.user_db_data:
+            user_data = st.session_state.user_db_data
+            (lvl_xp, lvl_title, _), next_limit = get_brain_status(user_data['total_xp'])
+            st.write(f"Rank: **{lvl_title}**")
+            prog = min((user_data['total_xp'] - lvl_xp) / (next_limit - lvl_xp), 1.0)
+            st.progress(prog)
+            
+            st.divider()
+            
+            # Daily Goal
+            render_daily_goal()
+            
+            st.divider()
+        
+        page = st.radio("Menu", ["Arcade", "Profile", "Insights"])
         
         st.divider()
-        
-        page = st.radio("Navigate", ["Arcade", "Insights", "Profile"])
-        
-        st.divider()
-        
-        if st.button("🚪 Logout"):
+        if st.button("🚪 Logout", use_container_width=True):
             st.session_state.clear()
             st.rerun()
     
-    # Route to pages
-    if page == "Arcade":
+    # Router
+    if page == "Arcade": 
         render_arcade()
-    elif page == "Insights":
-        render_insights()
-    else:
+    elif page == "Profile":
         render_profile()
+    else:
+        render_insights()
+
