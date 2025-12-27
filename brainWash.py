@@ -348,8 +348,8 @@ class GoalManager:
             INSERT INTO Goal (
                 user_id, goal_type, target_tasks, target_xp, target_focus_minutes,
                 period_start, period_end, status
-            ) VALUES (?, 'daily', ?, ?, ?, ?, ?, 'active')
-        """, (user_id, base_tasks, base_tasks * 100, 25, str(today), str(today), 'active'))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, 'daily', base_tasks, base_tasks * 100, 25, str(today), str(today), 'active'))
         
         # Weekly goal
         week_start = today - timedelta(days=today.weekday())
@@ -358,8 +358,8 @@ class GoalManager:
             INSERT INTO Goal (
                 user_id, goal_type, target_tasks, target_xp, target_focus_minutes,
                 period_start, period_end, status
-            ) VALUES (?, 'weekly', ?, ?, ?, ?, ?, 'active')
-        """, (user_id, base_tasks * 5, base_tasks * 500, weekly_hours * 60 // 2, 
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, 'weekly', base_tasks * 5, base_tasks * 500, weekly_hours * 60 // 2, 
               str(week_start), str(week_end), 'active'))
         
         conn.commit()
@@ -526,7 +526,7 @@ class TaskManager:
             INSERT INTO Task (
                 user_id, task_text, difficulty, xp_value,
                 subject, topic, solution, state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'new')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             user_id,
             task_data['text'],
@@ -534,7 +534,8 @@ class TaskManager:
             task_data['xp'],
             subject,
             topic,
-            task_data.get('solution', '')
+            task_data.get('solution', ''),
+            'new'
         ))
         
         task_id = cursor.lastrowid
