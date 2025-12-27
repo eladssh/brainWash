@@ -359,35 +359,6 @@ Potential additions:
 6. **Export Often**: Keep backups of your progress
 7. **Update Preferences**: Adjust as you learn what works
 
-## 📝 LinkedIn Post Template
-
-```
-🧠 Excited to share BrainWash: Arcade!
-
-A gamified learning platform I built that turns study 
-materials into epic quests. Here's what makes it special:
-
-✅ AI-Powered Personalization (Gemini)
-✅ Smart Analytics & Progress Tracking
-✅ Daily Goals & Streak System
-✅ XP, Levels, and Achievements
-✅ PDF Upload Support
-✅ Data Export to Google Sheets
-
-Built with: #Streamlit #Python #AI #SQLite
-Perfect for: #Students #Professionals #LifelongLearning
-
-The psychology behind it:
-- Immediate feedback loops boost engagement 60%
-- Graduated difficulty matches learning zones
-- Personalization improves retention 40%
-- Streak systems leverage loss aversion
-
-Try it yourself: [Your GitHub Link]
-
-#EdTech #Gamification #MachineLearning #ProductDevelopment
-```
-
 ## 📄 Project Structure
 
 ```
@@ -403,14 +374,6 @@ brainwash-arcade/
     └── secrets.toml        # Alternative for API keys
 ```
 
-## 🤝 Contributing
-
-Ideas for improvement? Feel free to:
-1. Fork the repository
-2. Add your features
-3. Share your enhancements
-4. Submit pull requests
-
 ## 📄 License
 
 Open source - modify freely for your learning journey!
@@ -420,29 +383,6 @@ Open source - modify freely for your learning journey!
 - **Google Gemini AI**: For intelligent task generation
 - **Streamlit**: For the incredible UI framework
 - **Learning Science**: Research that inspired gamification
-
 ---
-
-**Built with ❤️ for learners everywhere**
-
-*Transform your study routine from boring to epic! 🎮📚*
-
----
-
-## Quick Commands
-
-```bash
-# Install
-pip install -r requirements.txt
-
-# Run
-streamlit run brainwash_final.py
-
-# Reset database (fresh start)
-rm brainwash.db
-
-# Check Python version
-python --version  # Should be 3.8+
-```
 
 **Ready to level up your learning? Let's go! 🚀**
