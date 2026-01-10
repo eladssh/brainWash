@@ -12,20 +12,26 @@ from dotenv import load_dotenv
 import sqlite3
 from pathlib import Path
 import io
+import hashlib
 
 # --- 1. Database Setup ---
 DB_PATH = Path("brainwash.db")
+
+def hash_password(password):
+    """Hash password using SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def init_database():
     """Initialize SQLite database with User and TaskCompletion tables"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # User table
+    # User table with password
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS User (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
             total_xp INTEGER DEFAULT 0,
             tasks_completed INTEGER DEFAULT 0,
             daily_goal INTEGER DEFAULT 3,
@@ -48,6 +54,8 @@ def init_database():
             xp_earned INTEGER NOT NULL,
             subject TEXT,
             topic TEXT,
+            user_answer TEXT,
+            ai_feedback TEXT,
             completed_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES User(id)
         )
@@ -56,28 +64,51 @@ def init_database():
     conn.commit()
     conn.close()
 
-def get_or_create_user(username, onboarding_data=None):
-    """Get existing user or create new one"""
+def create_user(username, password, onboarding_data=None):
+    """Create new user with hashed password"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO User (username, password_hash, subjects_interested, learning_style, weekly_commitment, daily_goal)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            username,
+            hash_password(password),
+            onboarding_data.get('subjects', '') if onboarding_data else '',
+            onboarding_data.get('style', '') if onboarding_data else '',
+            onboarding_data.get('commitment', 3) if onboarding_data else 3,
+            onboarding_data.get('daily_goal', 3) if onboarding_data else 3
+        ))
+        conn.commit()
+        success = True
+    except sqlite3.IntegrityError:
+        success = False
+    
+    conn.close()
+    return success
+
+def verify_login(username, password):
+    """Verify username and password"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT password_hash FROM User WHERE username = ?", (username,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result and result[0] == hash_password(password):
+        return True
+    return False
+
+def get_user(username):
+    """Get user data by username"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM User WHERE username = ?", (username,))
     user = cursor.fetchone()
-    
-    if not user and onboarding_data:
-        cursor.execute("""
-            INSERT INTO User (username, subjects_interested, learning_style, weekly_commitment, daily_goal)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            username,
-            onboarding_data.get('subjects', ''),
-            onboarding_data.get('style', ''),
-            onboarding_data.get('commitment', 3),
-            onboarding_data.get('daily_goal', 3)
-        ))
-        conn.commit()
-        cursor.execute("SELECT * FROM User WHERE username = ?", (username,))
-        user = cursor.fetchone()
     
     conn.close()
     return user
@@ -136,8 +167,8 @@ def update_user_profile(username, subjects, learning_style, weekly_commitment, d
     conn.commit()
     conn.close()
 
-def log_task_completion(username, task_text, difficulty, xp_earned, subject, topic):
-    """Log a completed task"""
+def log_task_completion(username, task_text, difficulty, xp_earned, subject, topic, user_answer="", ai_feedback=""):
+    """Log a completed task with optional answer and feedback"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
@@ -146,9 +177,9 @@ def log_task_completion(username, task_text, difficulty, xp_earned, subject, top
     
     if user:
         cursor.execute("""
-            INSERT INTO TaskCompletion (user_id, task_text, difficulty, xp_earned, subject, topic)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user[0], task_text, difficulty, xp_earned, subject, topic))
+            INSERT INTO TaskCompletion (user_id, task_text, difficulty, xp_earned, subject, topic, user_answer, ai_feedback)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user[0], task_text, difficulty, xp_earned, subject, topic, user_answer, ai_feedback))
         conn.commit()
     
     conn.close()
@@ -437,6 +468,41 @@ st.markdown("""
         border-radius: 15px;
         margin: 20px 0;
     }
+    
+    .subject-tag {
+        display: inline-block;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        margin: 5px;
+        font-size: 0.9em;
+    }
+    
+    .answer-feedback {
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 10px;
+        border-left: 4px solid;
+    }
+    
+    .feedback-correct {
+        background: #e8f5e9;
+        border-color: #66bb6a;
+        color: #2e7d32;
+    }
+    
+    .feedback-partial {
+        background: #fff3e0;
+        border-color: #ffa726;
+        color: #e65100;
+    }
+    
+    .feedback-incorrect {
+        background: #ffebee;
+        border-color: #ff4b4b;
+        color: #c62828;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -450,7 +516,7 @@ def get_ai_client():
 def get_ai_response(prompt, is_json=False):
     client = get_ai_client()
     if not client: return None
-    model_id = "gemini-2.5-flash"
+    model_id = "gemini-2.0-flash-exp"
     config = types.GenerateContentConfig(
         temperature=0.7,
         response_mime_type="application/json" if is_json else "text/plain"
@@ -461,6 +527,41 @@ def get_ai_response(prompt, is_json=False):
     except Exception as e:
         st.error(f"AI Error: {e}")
         return None
+
+def check_answer(task_text, solution, user_answer):
+    """Use AI to check if user's answer is correct"""
+    prompt = f"""
+    Task: {task_text}
+    Expected Solution: {solution}
+    User's Answer: {user_answer}
+    
+    Evaluate if the user's answer is correct or close to the expected solution.
+    Return ONLY JSON with this format:
+    {{
+        "is_correct": true/false,
+        "score": 0-100,
+        "feedback": "brief feedback message",
+        "status": "correct"/"partial"/"incorrect"
+    }}
+    
+    Score guidelines:
+    - 90-100: Fully correct
+    - 60-89: Partially correct
+    - 0-59: Incorrect
+    """
+    
+    res = get_ai_response(prompt, is_json=True)
+    if res:
+        try:
+            return json.loads(res)
+        except:
+            return {
+                "is_correct": False,
+                "score": 0,
+                "feedback": "Could not evaluate answer",
+                "status": "incorrect"
+            }
+    return None
 
 def get_initial_plan(subject, topic, context="", user_context=""):
     prompt = f"""
@@ -493,6 +594,7 @@ if "current_tasks" not in st.session_state: st.session_state.current_tasks = []
 if "user_details" not in st.session_state: st.session_state.user_details = {}
 if "user_name" not in st.session_state: st.session_state.user_name = None
 if "user_db_data" not in st.session_state: st.session_state.user_db_data = None
+if "answer_mode" not in st.session_state: st.session_state.answer_mode = True  # Default to answer mode
 
 BRAIN_LEVELS = [
     (0, "🧟 Brain Rot", "Time to study!"),
@@ -521,19 +623,19 @@ def get_brain_status(xp):
 def load_user_data():
     """Load user data from database into session state"""
     if st.session_state.user_name:
-        user = get_or_create_user(st.session_state.user_name)
+        user = get_user(st.session_state.user_name)
         if user:
             st.session_state.user_db_data = {
                 'id': user[0],
                 'username': user[1],
-                'total_xp': user[2],
-                'tasks_completed': user[3],
-                'daily_goal': user[4],
-                'streak_days': user[5],
-                'last_activity_date': user[6],
-                'subjects_interested': user[8],
-                'learning_style': user[9],
-                'weekly_commitment': user[10]
+                'total_xp': user[3],
+                'tasks_completed': user[4],
+                'daily_goal': user[5],
+                'streak_days': user[6],
+                'last_activity_date': user[7],
+                'subjects_interested': user[9],
+                'learning_style': user[10],
+                'weekly_commitment': user[11]
             }
 
 # --- 5. Login Page ---
@@ -546,18 +648,19 @@ def render_login():
         </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["🔑 Been Here?", "✨ New Here?"])
+    tab1, tab2 = st.tabs(["🔑 Login", "✨ Register"])
     
     with tab1:
         st.markdown("### Welcome Back!")
         with st.form("login_form"):
             username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
             login_btn = st.form_submit_button("🚀 Enter Arcade", use_container_width=True, type="primary")
             
             if login_btn:
-                if not username:
-                    st.error("Please enter your username!")
-                elif user_exists(username):
+                if not username or not password:
+                    st.error("Please enter both username and password!")
+                elif verify_login(username, password):
                     st.session_state.user_name = username
                     st.session_state.authenticated = True
                     st.session_state.onboarded = True
@@ -566,26 +669,36 @@ def render_login():
                     time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("Username not found! Please create a new account in the 'New Here?' tab.")
+                    st.error("Invalid username or password!")
     
     with tab2:
         st.markdown("### Create Your Account")
         with st.form("signup_form"):
             new_username = st.text_input("Choose a Username", placeholder="brain_master_2024")
+            new_password = st.text_input("Choose a Password", type="password", placeholder="Min 6 characters")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Re-enter password")
             signup_btn = st.form_submit_button("🎯 Create Account", use_container_width=True, type="primary")
             
             if signup_btn:
-                if not new_username:
-                    st.error("Please choose a username!")
+                if not new_username or not new_password:
+                    st.error("Please fill in all fields!")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters long!")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match!")
                 elif user_exists(new_username):
-                    st.error("Username already exists! Please choose a different one or login.")
+                    st.error("Username already exists! Please choose a different one.")
                 else:
-                    st.session_state.user_name = new_username
-                    st.session_state.authenticated = True
-                    st.session_state.onboarded = False
-                    st.success(f"Account created! Let's set up your profile, {new_username}! 🎉")
-                    time.sleep(0.5)
-                    st.rerun()
+                    # Create user without onboarding data - will be added in onboarding
+                    if create_user(new_username, new_password):
+                        st.session_state.user_name = new_username
+                        st.session_state.authenticated = True
+                        st.session_state.onboarded = False
+                        st.success(f"Account created! Let's set up your profile, {new_username}! 🎉")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("Failed to create account. Please try again.")
 
 # --- 6. Enhanced Onboarding ---
 def render_onboarding():
@@ -613,8 +726,8 @@ def render_onboarding():
         with col1:
             st.markdown("""
                 <div class="feature-box">
-                    <h4>🤖 AI-Powered Personalization</h4>
-                    <p>Our Gemini AI adapts tasks to YOUR learning style, generating custom challenges based on your preferences and materials.</p>
+                    <h4>🤖 AI-Powered Answer Checking</h4>
+                    <p>Write your own answers and get instant AI feedback! Our system evaluates your responses and helps you learn from mistakes.</p>
                 </div>
                 
                 <div class="feature-box">
@@ -632,62 +745,9 @@ def render_onboarding():
                 
                 <div class="feature-box">
                     <h4>📈 Progress Persistence</h4>
-                    <p>All your data is saved locally. Your XP, achievements, and task history stay with you forever.</p>
+                    <p>All your data is saved securely. Your XP, achievements, and task history stay with you forever.</p>
                 </div>
             """, unsafe_allow_html=True)
-        
-        st.info("💡 **Perfect for**: Students, Lifelong Learners, Professionals upskilling, Anyone who wants to make studying fun!")
-    
-    # How It Works
-    with st.expander("📖 How BrainWash Works"):
-        st.markdown("""
-        ### Your Journey in 4 Simple Steps:
-        
-        **1. 📚 Choose Your Subject**
-        - Enter any topic manually OR upload PDFs/study materials
-        - Our AI scans and understands your content
-        
-        **2. 🎮 Get Your Quests**
-        - Receive 5 personalized tasks (1 Hard, 2 Medium, 2 Easy)
-        - Each task has solutions you can reveal when stuck
-        
-        **3. ✅ Complete & Earn**
-        - Mark tasks as done to earn XP (Easy: 50, Medium: 150, Hard: 300)
-        - Don't like a task? Reroll it for 20 XP!
-        
-        **4. 📊 Track & Improve**
-        - Watch your brain level evolve from 🧟 Brain Rot to 🌌 Galaxy Brain
-        - Analyze your learning patterns in the Insights dashboard
-        - Export your progress to Google Sheets anytime!
-        """)
-        
-        st.success("🏆 **Unlock Achievements**: Earn badges as you hit XP milestones and task counts!")
-    
-    # The Science
-    with st.expander("🧪 The Science Behind BrainWash"):
-        st.markdown("""
-        ### Why Gamification Works for Learning:
-        
-        **🎯 Immediate Feedback Loop**
-        - Instant XP rewards create dopamine hits that reinforce learning behavior
-        - Studies show gamified learning increases engagement by 60%
-        
-        **🔥 Consistency Through Streaks**
-        - Daily goals activate the "commitment and consistency" psychological principle
-        - Streaks leverage loss aversion - you don't want to break the chain!
-        
-        **📈 Mastery Progression**
-        - Clear brain levels provide tangible evidence of improvement
-        - Graduated difficulty (Easy → Medium → Hard) matches Vygotsky's Zone of Proximal Development
-        
-        **🤝 Social Proof Elements**
-        - Achievement badges tap into our need for status and recognition
-        - (Future: Leaderboards will add healthy competition!)
-        
-        **🎨 Personalization = Retention**
-        - AI-adapted tasks align with your learning style and pace
-        - Relevant content increases retention rates by up to 40%
-        """)
     
     st.divider()
     
@@ -739,23 +799,21 @@ def render_onboarding():
             if not subjects:
                 st.error("Please enter at least one subject!")
             else:
-                # Create user in database
-                onboarding_data = {
-                    'subjects': subjects,
-                    'style': learning_style,
-                    'commitment': weekly_commitment,
-                    'daily_goal': daily_goal
-                }
+                # Update user preferences
+                update_user_profile(
+                    st.session_state.user_name,
+                    subjects,
+                    learning_style,
+                    weekly_commitment,
+                    daily_goal
+                )
                 
-                user = get_or_create_user(st.session_state.user_name, onboarding_data)
-                
-                if user:
-                    st.session_state.onboarded = True
-                    load_user_data()
-                    st.balloons()
-                    st.success(f"🎉 All set, {st.session_state.user_name}! Let's start learning!")
-                    time.sleep(1.5)
-                    st.rerun()
+                st.session_state.onboarded = True
+                load_user_data()
+                st.balloons()
+                st.success(f"🎉 All set, {st.session_state.user_name}! Let's start learning!")
+                time.sleep(1.5)
+                st.rerun()
 
 # --- 7. Daily Goal Widget ---
 def render_daily_goal():
@@ -781,7 +839,7 @@ def render_daily_goal():
     elif today_count >= daily_goal * 0.5:
         st.info(f"💪 Halfway there! {daily_goal - today_count} more to go!")
 
-# --- 8. Insights Dashboard with Export ---
+# --- 8. Insights Dashboard ---
 def render_insights():
     st.title("📊 Learning Insights")
     
@@ -813,18 +871,6 @@ def render_insights():
                     use_container_width=True
                 )
                 st.success("✅ CSV ready for download!")
-            else:
-                st.info("No data to export yet!")
-    
-    with col2:
-        if st.button("📊 View Google Sheets Format", use_container_width=True):
-            if analytics['all_tasks']:
-                df = pd.DataFrame(
-                    analytics['all_tasks'],
-                    columns=['Completed At', 'Subject', 'Topic', 'Task', 'Difficulty', 'XP Earned']
-                )
-                st.dataframe(df, use_container_width=True)
-                st.info("💡 Copy this table and paste into Google Sheets!")
             else:
                 st.info("No data to export yet!")
     
@@ -935,7 +981,7 @@ def render_insights():
     else:
         st.info("No recent tasks to display.")
 
-# --- 9. Profile with Editable Preferences ---
+# --- 9. Profile ---
 def render_profile():
     st.title("👤 Brain Profile")
     
@@ -1037,23 +1083,6 @@ def render_profile():
                         <span class="status-dot offline"></span>
                     </div>
                 </div>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
-                    <button style="
-                        width: 100%;
-                        padding: 10px;
-                        background: white;
-                        border: 2px solid #7F00FF;
-                        color: #7F00FF;
-                        border-radius: 8px;
-                        font-size: 14px;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: all 0.3s;
-                    " onmouseover="this.style.background='#7F00FF'; this.style.color='white';" 
-                       onmouseout="this.style.background='white'; this.style.color='#7F00FF';">
-                        ➕ Add Friend
-                    </button>
-                </div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -1081,27 +1110,6 @@ def render_profile():
                 </div>
             """, unsafe_allow_html=True)
 
-    st.divider()
-    
-    # Focus Mode Timer
-    st.subheader("⏲️ Focus Mode")
-    with st.expander("Start Deep Work Session"):
-        focus_mins = st.slider("Select Duration (Minutes)", 5, 120, 25)
-        c1, c2 = st.columns(2)
-        if c1.button("🚀 Start Timer", use_container_width=True, type="primary"):
-            p = st.empty()
-            stop_button_placeholder = c2.empty()
-            for s in range(focus_mins * 60, 0, -1):
-                if stop_button_placeholder.button("🛑 Stop & Reset", key=f"stop_{s}", use_container_width=True):
-                    st.rerun()
-                m, sc = divmod(s, 60)
-                p.metric("Time Remaining", f"{m:02d}:{sc:02d}")
-                time.sleep(1)
-            st.balloons()
-            update_user_stats(st.session_state.user_name, xp_gained=50)
-            load_user_data()
-            st.rerun()
-    
 # --- 10. Arcade ---
 def render_arcade():
     if not st.session_state.user_db_data:
@@ -1110,11 +1118,18 @@ def render_arcade():
     
     user_data = st.session_state.user_db_data
     
-    # Intro Banner
-    st.markdown("""
+    # Intro Banner with Subject Preferences
+    subjects_list = [s.strip() for s in user_data['subjects_interested'].split(',') if s.strip()]
+    subjects_html = ''.join([f'<span class="subject-tag">{s}</span>' for s in subjects_list])
+    
+    st.markdown(f"""
         <div class="intro-banner">
             <h2>Welcome to BrainWash Arcade 🎮</h2>
             <p>Turn study materials into active quests. Earn XP, unlock ranks, and master subjects!</p>
+            <div style="margin-top: 15px;">
+                <strong>Your Interests:</strong><br>
+                {subjects_html if subjects_html else '<em>No subjects set yet</em>'}
+            </div>
         </div>
     """, unsafe_allow_html=True)
     
@@ -1123,6 +1138,16 @@ def render_arcade():
     prog = min((user_data['total_xp'] - lvl_xp) / (next_limit - lvl_xp), 1.0)
     st.write(f"**Rank:** {lvl_title} ({user_data['total_xp']} XP)")
     st.progress(prog)
+    
+    # Answer Mode Toggle
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        answer_mode = st.toggle(
+            "✍️ Answer Mode (Write & Check Answers)", 
+            value=st.session_state.answer_mode,
+            help="When enabled, you can write your answers and get AI feedback"
+        )
+        st.session_state.answer_mode = answer_mode
 
     if not st.session_state.user_details:
         # User context for AI
@@ -1166,32 +1191,99 @@ def render_arcade():
                 </div>
             """, unsafe_allow_html=True)
             
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("✅ Done", key=f"d{i}", use_container_width=True, type="primary"):
-                    # Update database
-                    update_user_stats(st.session_state.user_name, xp_gained=xp, task_completed=True)
-                    log_task_completion(
-                        st.session_state.user_name,
-                        task['text'],
-                        d,
-                        xp,
-                        st.session_state.user_details['sub'],
-                        st.session_state.user_details['top']
+            # Answer Mode
+            if st.session_state.answer_mode:
+                with st.form(f"answer_form_{i}"):
+                    user_answer = st.text_area(
+                        "✍️ Your Answer:",
+                        placeholder="Write your answer here...",
+                        height=100,
+                        key=f"answer_{i}"
                     )
-                    load_user_data()
                     
-                    # Generate new task
-                    with st.spinner("New task..."):
-                        new = get_new_task_json(
-                            st.session_state.user_details['sub'], 
-                            st.session_state.user_details['top'], 
+                    col1, col2, col3 = st.columns(3)
+                    submit_answer = col1.form_submit_button("✅ Submit Answer", type="primary", use_container_width=True)
+                    
+                    if submit_answer and user_answer.strip():
+                        with st.spinner("🤖 AI is checking your answer..."):
+                            result = check_answer(task['text'], task.get('solution', ''), user_answer)
+                            
+                            if result:
+                                feedback_class = f"feedback-{result['status']}"
+                                status_emoji = {"correct": "🎉", "partial": "👍", "incorrect": "❌"}
+                                
+                                st.markdown(f"""
+                                    <div class="answer-feedback {feedback_class}">
+                                        <strong>{status_emoji.get(result['status'], '💭')} {result['feedback']}</strong><br>
+                                        <small>Score: {result['score']}/100</small>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Award XP based on score
+                                earned_xp = int(xp * (result['score'] / 100))
+                                
+                                if result['score'] >= 60:  # Partial credit threshold
+                                    update_user_stats(st.session_state.user_name, xp_gained=earned_xp, task_completed=True)
+                                    log_task_completion(
+                                        st.session_state.user_name,
+                                        task['text'],
+                                        d,
+                                        earned_xp,
+                                        st.session_state.user_details['sub'],
+                                        st.session_state.user_details['top'],
+                                        user_answer,
+                                        result['feedback']
+                                    )
+                                    load_user_data()
+                                    
+                                    st.success(f"🎊 Earned {earned_xp} XP!")
+                                    
+                                    # Generate new task
+                                    with st.spinner("Generating new task..."):
+                                        new = get_new_task_json(
+                                            st.session_state.user_details['sub'], 
+                                            st.session_state.user_details['top'], 
+                                            d,
+                                            user_context=user_context
+                                        )
+                                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                                    
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.info("💪 Keep trying! You can reroll or try a different approach.")
+            
+            else:
+                # Regular mode (quick complete)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Done", key=f"d{i}", use_container_width=True, type="primary"):
+                        # Update database
+                        update_user_stats(st.session_state.user_name, xp_gained=xp, task_completed=True)
+                        log_task_completion(
+                            st.session_state.user_name,
+                            task['text'],
                             d,
-                            user_context=user_context
+                            xp,
+                            st.session_state.user_details['sub'],
+                            st.session_state.user_details['top']
                         )
-                        st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
-                    st.rerun()
-            with c2:
+                        load_user_data()
+                        
+                        # Generate new task
+                        with st.spinner("New task..."):
+                            new = get_new_task_json(
+                                st.session_state.user_details['sub'], 
+                                st.session_state.user_details['top'], 
+                                d,
+                                user_context=user_context
+                            )
+                            st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                        st.rerun()
+            
+            # Reroll button (available in both modes)
+            col_reroll = st.columns([1, 1])[1] if not st.session_state.answer_mode else st.columns([1])[0]
+            with col_reroll:
                 if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
                     if user_data['total_xp'] >= 20:
                         update_user_stats(st.session_state.user_name, xp_gained=-20)
@@ -1205,6 +1297,8 @@ def render_arcade():
                             )
                             st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
                         st.rerun()
+                    else:
+                        st.error("Not enough XP to reroll!")
             
             with st.expander("💡 Show Solution"):
                 st.write(task.get('solution', 'No solution found.'))
@@ -1258,4 +1352,3 @@ else:
         render_profile()
     else:
         render_insights()
-
