@@ -516,7 +516,7 @@ def get_ai_client():
 def get_ai_response(prompt, is_json=False):
     client = get_ai_client()
     if not client: return None
-    model_id = "gemini-2.0-flash-exp"
+    model_id = "gemini-2.5-flash"
     config = types.GenerateContentConfig(
         temperature=0.7,
         response_mime_type="application/json" if is_json else "text/plain"
@@ -1153,11 +1153,15 @@ def render_arcade():
         # User context for AI
         user_context = f"Subjects: {user_data['subjects_interested']}, Learning style: {user_data['learning_style']}"
         
+        # Get user's first subject as default
+        subjects_list = [s.strip() for s in user_data['subjects_interested'].split(',') if s.strip()]
+        default_subject = subjects_list[0] if subjects_list else "Math"
+        
         t1, t2 = st.tabs(["🔍 Subject Search", "📄 PDF Scan"])
         with t1:
             with st.form("manual"):
-                sub = st.text_input("Subject", "Math")
-                top = st.text_input("Topic", "Matrices")
+                sub = st.text_input("Subject", default_subject)
+                top = st.text_input("Topic", "")
                 if st.form_submit_button("Start Mission"):
                     plan = get_initial_plan(sub, top, user_context=user_context)
                     if plan:
@@ -1166,7 +1170,7 @@ def render_arcade():
                         st.rerun()
         with t2:
             with st.form("pdf"):
-                sub_p = st.text_input("Subject")
+                sub_p = st.text_input("Subject", default_subject)
                 f = st.file_uploader("Upload PDF", type="pdf")
                 if st.form_submit_button("Analyze & Play"):
                     if f:
