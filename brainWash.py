@@ -1284,10 +1284,26 @@ def render_arcade():
                             )
                             st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
                         st.rerun()
+                
+                with c2:
+                    if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
+                        if user_data['total_xp'] >= 20:
+                            update_user_stats(st.session_state.user_name, xp_gained=-20)
+                            load_user_data()
+                            with st.spinner("Rerolling..."):
+                                new = get_new_task_json(
+                                    st.session_state.user_details['sub'], 
+                                    st.session_state.user_details['top'], 
+                                    d,
+                                    user_context=user_context
+                                )
+                                st.session_state.current_tasks[i] = {**new, "difficulty": d, "xp": xp}
+                            st.rerun()
+                        else:
+                            st.error("Not enough XP to reroll!")
             
-            # Reroll button (available in both modes)
-            col_reroll = st.columns([1, 1])[1] if not st.session_state.answer_mode else st.columns([1])[0]
-            with col_reroll:
+            # Reroll button for Answer Mode
+            if st.session_state.answer_mode:
                 if st.button("🎲 Reroll (-20)", key=f"r{i}", use_container_width=True):
                     if user_data['total_xp'] >= 20:
                         update_user_stats(st.session_state.user_name, xp_gained=-20)
